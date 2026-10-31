@@ -56,3 +56,11 @@ DB を使うテスト（`tests/Integration`）は `ISUREAL_TEST_DATABASE=1` の�
 ```sh
 ISUREAL_TEST_DATABASE=1 ISUREAL_DB_NAME=isureal_test make test
 ```
+
+## リクエスト本文の一時書き込み
+
+API と通知の入口は `Http/ServerRequestFactory` を使います。PHP が保持する `php://input` を直接読み、
+Slim の再読込用 `php://temp` キャッシュへの重複書き込みを避けます。巻き戻しには PHP 自体の入力バッファを使い、
+ヘッダー・Cookie・フォーム・アップロードの解釈は Slim の既存処理を利用します。
+
+nginx の本文バッファと PHP 自体の入力バッファは、この変更の対象外です。
