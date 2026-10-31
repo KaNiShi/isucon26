@@ -17,6 +17,8 @@ final readonly class Config
         public string $notificationHost = '127.0.0.1',
         public int $notificationPort = 9002,
         public int $notificationMaxConnections = 256,
+        // 画像本体のキャッシュを置くディレクトリ。空文字列なら使わない
+        public string $imageCacheDir = '',
     ) {
     }
 
@@ -33,6 +35,7 @@ final readonly class Config
             notificationHost: self::env('ISUREAL_NOTIFICATION_HOST', '127.0.0.1'),
             notificationPort: self::positiveIntEnv('ISUREAL_NOTIFICATION_PORT', 9002, 65535),
             notificationMaxConnections: self::positiveIntEnv('ISUREAL_NOTIFICATION_MAX_CONNECTIONS', 256, 256),
+            imageCacheDir: self::imageCacheDirFromEnv(),
         );
     }
 
@@ -45,6 +48,15 @@ final readonly class Config
             $this->dbPort,
             $this->dbName,
         );
+    }
+
+    /**
+     * ISUREAL_IMAGE_CACHE_DIR が off ならキャッシュを使わない。未設定なら一時ディレクトリの下に置く
+     */
+    private static function imageCacheDirFromEnv(): string
+    {
+        $dir = self::env('ISUREAL_IMAGE_CACHE_DIR', sys_get_temp_dir() . '/isureal-image-cache');
+        return $dir === 'off' ? '' : rtrim($dir, '/');
     }
 
     private static function env(string $key, string $default): string

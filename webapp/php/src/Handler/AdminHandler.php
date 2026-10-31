@@ -15,6 +15,7 @@ use Isureal\Model\Region;
 use Isureal\Model\User;
 use Isureal\Repository\AdminSessionRepository;
 use Isureal\Repository\PostingWindowRepository;
+use Isureal\Repository\UserRegionLock;
 use Isureal\Time;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -98,7 +99,7 @@ final readonly class AdminHandler
         }
         $seconds = $onTimeSeconds ?? 24 * 60 * 60;
         $window = $this->db->transaction(function (Database $db) use ($region, $localDate, $seconds): PostingWindow {
-            $db->execute('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
+            UserRegionLock::lockExclusive($db, $region);
             $conflict = $db->fetchValue(
                 'SELECT EXISTS(SELECT 1 FROM posting_windows WHERE region = :region AND local_date >= :local_date)',
                 ['region' => $region, 'local_date' => $localDate->format('Y-m-d')],
@@ -128,6 +129,7 @@ final readonly class AdminHandler
                  SELECT gen_random_uuid()::text, id, :window_id, :created_at FROM users WHERE region = :region AND status = 'active'",
                 ['region' => $region, 'window_id' => $windowId, 'created_at' => Time::toDb($startsAt)],
             );
+            // 待機中の GET /api/notifications を起こす。NOTIFY はコミット時に配信される
             $db->execute("SELECT pg_notify('posting_window_opened', :region)", ['region' => $region]);
             return $this->windows->mustFind($windowId);
         });

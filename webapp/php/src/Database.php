@@ -95,6 +95,26 @@ final class Database
     }
 
     /**
+     * NOTIFY を受け取れるようにする。チャンネル名は定数で渡すこと
+     */
+    public function listen(string $channel): void
+    {
+        $this->pdo->exec('LISTEN ' . $channel);
+    }
+
+    /**
+     * NOTIFY が届くまで最大 $timeoutMilliseconds ミリ秒待つ。届かなければ null
+     *
+     * @return array{message: string, pid: int, payload?: string}|null
+     */
+    public function waitNotify(int $timeoutMilliseconds): ?array
+    {
+        /** @var array{message: string, pid: int, payload?: string}|false $notify */
+        $notify = $this->pdo->getNotify(PDO::FETCH_ASSOC, $timeoutMilliseconds);
+        return $notify === false ? null : $notify;
+    }
+
+    /**
      * 複数の文をまとめて実行する（スキーマの作成など）
      */
     public function executeScript(string $sql): void
