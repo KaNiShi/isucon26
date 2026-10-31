@@ -14,6 +14,7 @@ use Isureal\Ids;
 use Isureal\Model\Region;
 use Isureal\Model\User;
 use Isureal\Repository\SessionRepository;
+use Isureal\Repository\UserRegionLock;
 use Isureal\Repository\UserRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -40,14 +41,13 @@ final readonly class AuthHandler
         }
         $secretKey = Ids::generate();
         $user = $this->db->transaction(function (Database $db) use ($input, $secretKey): User {
-            // ユーザー名が一意である必要があります。
-            $db->execute('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
-            if ($db->fetchValue('SELECT EXISTS(SELECT 1 FROM users WHERE username = :username)', ['username' => $input['username']])) {
-                throw new ApiError(409, 'username_taken');
-            }
+            UserRegionLock::lockShared($db, $input['region']);
             $userId = Ids::generate();
-            $db->execute(
-                'INSERT INTO users (id, username, secret_key_hash, display_name, region) VALUES (:id, :username, :secret_key_hash, :display_name, :region)',
+            $inserted = $db->fetchOne(
+                'INSERT INTO users (id, username, secret_key_hash, display_name, region)
+                 VALUES (:id, :username, :secret_key_hash, :display_name, :region)
+                 ON CONFLICT (username) DO NOTHING
+                 RETURNING id',
                 [
                     'id' => $userId,
                     'username' => $input['username'],
@@ -56,6 +56,9 @@ final readonly class AuthHandler
                     'region' => $input['region'],
                 ],
             );
+            if ($inserted === null) {
+                throw new ApiError(409, 'username_taken');
+            }
             return $this->users->mustFind($userId);
         });
         return Json::respond($response, ['secretKey' => $secretKey, 'user' => $user->toSessionUser()], 201);
