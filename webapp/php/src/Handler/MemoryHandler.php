@@ -61,7 +61,8 @@ final readonly class MemoryHandler
             throw new ApiError(400, 'invalid_pagination');
         }
         $posts = $this->posts->selectWithAuthor(
-            'AND p.posting_window_id IN (SELECT id FROM posting_windows WHERE local_date >= :start AND local_date < :end)
+            'AND p.author_id = :author_id
+             AND p.posting_window_id IN (SELECT id FROM posting_windows WHERE local_date >= :start AND local_date < :end)
              AND (:before_at::timestamptz IS NULL OR (p.posted_at, p.id) < (:before_at, :before_id))
              ORDER BY p.posted_at DESC, p.id DESC LIMIT 51',
             [
