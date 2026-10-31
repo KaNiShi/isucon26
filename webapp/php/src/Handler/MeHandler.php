@@ -16,6 +16,7 @@ use Isureal\Jpeg;
 use Isureal\Model\Region;
 use Isureal\Model\User;
 use Isureal\Repository\UserRepository;
+use Isureal\Repository\UserRegionLock;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -52,6 +53,10 @@ final readonly class MeHandler
             throw new ApiError(400, 'invalid_profile');
         }
         $user = $this->db->transaction(function (Database $db) use ($session, $displayName, $bio, $region): User {
+            if ($region !== null) {
+                UserRegionLock::lockAllShared($db);
+                $db->fetchValue('SELECT id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $session->userId]);
+            }
             if ($displayName !== null) {
                 $db->execute('UPDATE users SET display_name = :value, updated_at = clock_timestamp() WHERE id = :id', ['id' => $session->userId, 'value' => $displayName]);
             }
@@ -123,6 +128,7 @@ final readonly class MeHandler
     {
         $userId = SessionMiddleware::session($request)->userId;
         $this->db->transaction(function (Database $db) use ($userId): void {
+            UserRegionLock::lockAllShared($db);
             if (!$this->users->lock($userId, activeOnly: true)) {
                 throw new ApiError(404, 'account_not_found');
             }

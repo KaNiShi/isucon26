@@ -84,7 +84,7 @@ CREATE TABLE users (
 );
 ALTER TABLE image_objects ADD CONSTRAINT image_objects_owner_fk FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT;
 -- ログイン・登録でユーザー名から探す
-CREATE INDEX users_username ON users(username);
+CREATE UNIQUE INDEX users_username_unique ON users(username);
 
 -- 2026-09-10 管理者を消す時のオペレーションはどうすればよいですか？
 -- 2026-09-13 消すことは想定されていません

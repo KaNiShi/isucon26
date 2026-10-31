@@ -9,7 +9,8 @@
 
 BEGIN;
 
-CREATE INDEX IF NOT EXISTS users_username ON users(username);
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username);
+DROP INDEX IF EXISTS users_username;
 CREATE INDEX IF NOT EXISTS login_sessions_token_hash ON login_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS login_sessions_user_id ON login_sessions(user_id) WHERE active;
 CREATE INDEX IF NOT EXISTS friendships_user_high_id ON friendships(user_high_id);
