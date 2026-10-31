@@ -53,7 +53,7 @@ final readonly class CommentRepository
             return false;
         }
         [$post] = $found;
-        $viewer = $this->posts->loadViewer($viewerId);
+        $viewer = $this->posts->loadViewerForPost($viewerId, $post);
         if ($viewer === null || !$viewer->canView($post) || $post->windowEndedAt !== null) {
             return false;
         }

@@ -7,6 +7,7 @@ namespace Isureal\Repository;
 use Isureal\Database;
 use Isureal\Model\Post;
 use Isureal\Model\User;
+use Isureal\Model\Visibility;
 use Isureal\Model\ViewerContext;
 
 final readonly class PostRepository
@@ -67,16 +68,7 @@ final readonly class PostRepository
         if ($user === null) {
             return null;
         }
-        $hasPostedToday = $this->db->fetchValue(
-            'SELECT EXISTS(
-               SELECT 1 FROM posts p
-               JOIN posting_windows posted ON posted.id = p.posting_window_id
-               JOIN posting_windows current ON current.region = :region AND current.ended_at IS NULL
-                                           AND current.local_date = posted.local_date
-               WHERE p.author_id = :user_id AND p.deleted_at IS NULL
-             )',
-            ['user_id' => $user->id, 'region' => $user->region],
-        );
+        $hasPostedToday = $this->hasPostedToday($user->id, $user->region);
         $blocked = $this->blockedUserIds($user->id);
         $friendIds = $this->friendIds($user->id);
         if ($friendIds === []) {
@@ -107,13 +99,120 @@ final readonly class PostRepository
         return new ViewerContext($user, $hasPostedToday, $friends, $friendsOfFriends, $mutualFriends, $blocked);
     }
 
+    /**
+     * 投稿1件の閲覧判定に必要な関係だけを含む閲覧者を返す。
+     */
+    public function loadViewerForPost(string $viewerId, Post $post): ?ViewerContext
+    {
+        $user = $this->users->find($viewerId);
+        if ($user === null) {
+            return null;
+        }
+
+        $hasPostedToday = $this->hasPostedToday($user->id, $user->region);
+        if ($post->authorId === $user->id) {
+            return new ViewerContext($user, $hasPostedToday, [], [], [], []);
+        }
+        if ($post->windowEndedAt !== null || !$hasPostedToday) {
+            return new ViewerContext($user, $hasPostedToday, [], [], [], []);
+        }
+
+        $blocked = $this->isBlocked($user->id, $post->authorId) ? [$post->authorId => true] : [];
+        if ($blocked !== []) {
+            return new ViewerContext($user, $hasPostedToday, [], [], [], $blocked);
+        }
+
+        $friends = [];
+        $friendsOfFriends = [];
+        $visibility = Visibility::tryFrom($post->visibility);
+        if ($visibility === Visibility::Friends || $visibility === Visibility::FriendsOfFriends) {
+            $isFriend = $this->areFriends($user->id, $post->authorId);
+            if ($isFriend) {
+                $friends[$post->authorId] = true;
+                if ($visibility === Visibility::FriendsOfFriends) {
+                    $friendsOfFriends[$post->authorId] = true;
+                }
+            } elseif ($visibility === Visibility::FriendsOfFriends && $this->shareFriend($user->id, $post->authorId)) {
+                $friendsOfFriends[$post->authorId] = true;
+            }
+        }
+
+        return new ViewerContext($user, $hasPostedToday, $friends, $friendsOfFriends, [], $blocked);
+    }
+
     public function canView(string $viewerId, string $postId): bool
     {
         $found = $this->findWithAuthor($postId);
         if ($found === null) {
             return false;
         }
-        return $this->loadViewer($viewerId)?->canView($found[0]) ?? false;
+        return $this->loadViewerForPost($viewerId, $found[0])?->canView($found[0]) ?? false;
+    }
+
+    private function hasPostedToday(string $userId, string $region): bool
+    {
+        return (bool) $this->db->fetchValue(
+            'SELECT EXISTS(
+               SELECT 1 FROM posts p
+               JOIN posting_windows posted ON posted.id = p.posting_window_id
+               JOIN posting_windows current ON current.region = :region AND current.ended_at IS NULL
+                                           AND current.local_date = posted.local_date
+               WHERE p.author_id = :user_id AND p.deleted_at IS NULL
+             )',
+            ['user_id' => $userId, 'region' => $region],
+        );
+    }
+
+    private function isBlocked(string $userId, string $otherId): bool
+    {
+        return (bool) $this->db->fetchValue(
+            'SELECT EXISTS(
+               SELECT 1 FROM block_relations
+               WHERE (blocker_id = :user_id AND blocked_id = :other_id)
+                  OR (blocker_id = :other_id AND blocked_id = :user_id)
+             )',
+            ['user_id' => $userId, 'other_id' => $otherId],
+        );
+    }
+
+    private function areFriends(string $userId, string $otherId): bool
+    {
+        return (bool) $this->db->fetchValue(
+            'SELECT EXISTS(
+               SELECT 1 FROM friendships
+               WHERE (user_low_id = :user_id AND user_high_id = :other_id)
+                  OR (user_low_id = :other_id AND user_high_id = :user_id)
+             )',
+            ['user_id' => $userId, 'other_id' => $otherId],
+        );
+    }
+
+    private function shareFriend(string $userId, string $otherId): bool
+    {
+        return (bool) $this->db->fetchValue(
+            'SELECT EXISTS(
+               SELECT 1 FROM friendships viewer_low
+               JOIN friendships author_low
+                 ON viewer_low.user_high_id = author_low.user_high_id
+               WHERE viewer_low.user_low_id = :user_id AND author_low.user_low_id = :other_id
+               UNION ALL
+               SELECT 1 FROM friendships viewer_low
+               JOIN friendships author_high
+                 ON viewer_low.user_high_id = author_high.user_low_id
+               WHERE viewer_low.user_low_id = :user_id AND author_high.user_high_id = :other_id
+               UNION ALL
+               SELECT 1 FROM friendships viewer_high
+               JOIN friendships author_low
+                 ON viewer_high.user_low_id = author_low.user_high_id
+               WHERE viewer_high.user_high_id = :user_id AND author_low.user_low_id = :other_id
+               UNION ALL
+               SELECT 1 FROM friendships viewer_high
+               JOIN friendships author_high
+                 ON viewer_high.user_low_id = author_high.user_low_id
+               WHERE viewer_high.user_high_id = :user_id AND author_high.user_high_id = :other_id
+             )',
+            ['user_id' => $userId, 'other_id' => $otherId],
+        );
     }
 
     /**
