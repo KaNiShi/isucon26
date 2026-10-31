@@ -12,6 +12,9 @@ final class Jpeg
     public static function size(string $data): ?array
     {
         ini_set('gd.jpeg_ignore_warning', '0');
+        $info = getimagesizefromstring($data);
+        return $info ? [$info[0], $info[1]] : null;
+
         $path = tempnam(sys_get_temp_dir(), 'jpeg') ?: throw new \RuntimeException('failed to create a temporary file');
         try {
             file_put_contents($path, $data);
