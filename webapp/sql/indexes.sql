@@ -16,6 +16,9 @@ CREATE INDEX IF NOT EXISTS friendships_user_high_id ON friendships(user_high_id)
 CREATE INDEX IF NOT EXISTS follows_followee_id ON follows(followee_id);
 CREATE INDEX IF NOT EXISTS block_relations_blocked_id ON block_relations(blocked_id);
 CREATE INDEX IF NOT EXISTS posts_image_id ON posts(image_id);
+CREATE INDEX IF NOT EXISTS posts_author_posted_at_id_active ON posts(author_id, posted_at DESC, id DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS comments_post_created_id_active ON comments(post_id, created_at, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS realmojis_post_created_id_active ON realmojis(post_id, created_at DESC, id DESC) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS friend_requests_recipient_id_status ON friend_requests(recipient_id, status);
 CREATE INDEX IF NOT EXISTS friend_requests_requester_id_status ON friend_requests(requester_id, status);
 CREATE INDEX IF NOT EXISTS realmojis_image_reactor_active ON realmojis(image_id, reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
