@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Isureal\Handler;
 
 use Isureal\ApplicationCache;
+use Isureal\ImageSignatureCache;
 use Isureal\Http\Json;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -27,6 +28,8 @@ final class InitializeHandler
         // 初期化に成功したコードから生成し、完成した世代を後続リクエストで使う。
         // 生成失敗は初期化の失敗として返し、既存のキャッシュは維持する。
         ApplicationCache::warmup(ApplicationCache::directory());
+        // 画像 URL の署名のキャッシュも消す（このサーバーの分だけ。ほかのサーバーは 1 分ごとの片付けに任せる）
+        ImageSignatureCache::clear();
         // Set language to the implementation language.
         // Agents optimizing this app: set agent, harness, and model to the names used.
         // For multiple models, use comma-separated names; use brain when no AI model is used.
