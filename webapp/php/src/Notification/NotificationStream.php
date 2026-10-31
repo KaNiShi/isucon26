@@ -27,7 +27,7 @@ use Slim\ResponseEmitter;
  *
  * 新しい通知が届くまで接続を保持し、届いたら 1 件送って閉じる（Server-Sent Events）。
  * 待つ間は worker を占有する。DB は LISTEN して NOTIFY で起こされるのを待つので、
- * 待つ間に定期的な問い合わせはしない（NOTIFY は AdminHandler が通知を作るときに送る）。
+ * NOTIFY または最大 5 秒のタイムアウトで問い合わせる（NOTIFY は AdminHandler が通知を作るときに送る）。
  */
 final class NotificationStream
 {
@@ -48,14 +48,14 @@ final class NotificationStream
         $request = $request->withAttribute(ActionLogEntry::ATTRIBUTE, $entry);
         $route = $request->getMethod() === 'GET' && $request->getUri()->getPath() === '/api/notifications' ? '/api/notifications' : null;
         try {
-            [$db, $session, $connectedAt] = $this->open($request);
+            [$db, $session, $since] = $this->open($request);
         } catch (\Throwable $e) {
             $response = ErrorHandler::render(new Response(), $e);
             new ResponseEmitter()->emit($response);
             $this->log->write($request, $route, $response->getStatusCode(), $entry);
             return;
         }
-        $this->stream($db, $session, $connectedAt);
+        $this->stream($db, $session, $since);
         $this->log->write($request, $route, 200, $entry);
     }
 
@@ -80,10 +80,16 @@ final class NotificationStream
         if ($session->region !== $this->config->region) {
             throw new ApiError(403, 'region_mismatch');
         }
-        return [$db, $session, $db->fetchValue('SELECT clock_timestamp()')];
+        // 作成時刻とコミットの間に接続しても、未コミットだった通知を次の poll() で拾う。
+        // 投稿期間の作成は users のロックで直列化され、通知の created_at はその順に増える。
+        $since = $db->fetchValue(
+            "SELECT coalesce(max(created_at), '-infinity') FROM notifications WHERE user_id = :user_id",
+            ['user_id' => $session->userId],
+        );
+        return [$db, $session, $since];
     }
 
-    private function stream(Database $db, LoginSession $session, string $connectedAt): void
+    private function stream(Database $db, LoginSession $session, string $since): void
     {
         set_time_limit(0);
         while (ob_get_level() > 0) {
@@ -101,7 +107,7 @@ final class NotificationStream
             $shouldPoll = true;
             while (!connection_aborted()) {
                 if ($shouldPoll) {
-                    $notification = $this->poll($db, $session, $connectedAt);
+                    $notification = $this->poll($db, $session, $since);
                     if ($notification === false) {
                         return;
                     }
@@ -129,7 +135,7 @@ final class NotificationStream
      *
      * @return array<string, string>|false|null
      */
-    private function poll(Database $db, LoginSession $session, string $connectedAt): array|false|null
+    private function poll(Database $db, LoginSession $session, string $since): array|false|null
     {
         $user = new UserRepository($db)->find($session->userId);
         if ($user === null || $user->region !== $session->region) {
@@ -138,9 +144,9 @@ final class NotificationStream
         $notification = $db->fetchOne(
             'SELECT n.id, n.posting_window_id, w.region, n.created_at
              FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
-             WHERE n.user_id = :user_id AND n.created_at > :connected_at AND w.ended_at IS NULL
+             WHERE n.user_id = :user_id AND n.created_at > :since AND w.ended_at IS NULL
              ORDER BY n.created_at, n.id LIMIT 1',
-            ['user_id' => $session->userId, 'connected_at' => $connectedAt],
+            ['user_id' => $session->userId, 'since' => $since],
         );
         if ($notification === null) {
             return null;

@@ -61,7 +61,8 @@ final readonly class PostHandler
         [$post, $user] = $this->db->transaction(function (Database $db) use ($userId, $imageData, $caption, $visibility, $location): array {
             $this->users->mustLock($userId);
             $user = $this->users->mustFind($userId);
-            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR UPDATE';
+            // 投稿同士は並行できる。開催終了の UPDATE とは競合し、確定まで投稿枠を維持する。
+            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR SHARE';
             $window = $db->fetchOne($sql, ['region' => $user->region]);
             $window ??= $db->fetchOne($sql, ['region' => $user->region]);
             if ($window === null) {
