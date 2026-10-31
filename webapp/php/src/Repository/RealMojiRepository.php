@@ -45,4 +45,34 @@ final readonly class RealMojiRepository
         );
         return array_map(static fn (array $row): array => [RealMoji::fromRow($row), User::fromRow($row, 'reactor.')], $rows);
     }
+
+    /**
+     * 各投稿の現在有効な RealMoji を新しい順に指定件数まで返す。
+     *
+     * @param list<string> $postIds
+     * @return list<array{RealMoji, User}>
+     */
+    public function selectCurrentForPosts(array $postIds, int $limitPerPost = 50): array
+    {
+        if ($postIds === []) {
+            return [];
+        }
+        [$in, $params] = Database::inClause('post', $postIds);
+        $params['limit_per_post'] = $limitPerPost;
+        $rows = $this->db->fetchAll(
+            'SELECT x.*
+             FROM posts p
+             CROSS JOIN LATERAL (
+                 SELECT ' . RealMoji::COLUMNS . ', ' . User::columnsAs('u', 'reactor') . '
+                 FROM realmojis r JOIN users u ON u.id = r.reactor_id AND u.status = \'active\'
+                 WHERE r.post_id = p.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
+                 ORDER BY r.created_at DESC, r.id DESC
+                 LIMIT :limit_per_post
+             ) x
+             WHERE p.id IN (' . $in . ')
+             ORDER BY x.post_id, x.created_at DESC, x.id DESC',
+            $params,
+        );
+        return array_map(static fn (array $row): array => [RealMoji::fromRow($row), User::fromRow($row, 'reactor.')], $rows);
+    }
 }

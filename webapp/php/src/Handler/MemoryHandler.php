@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Isureal\Handler;
 
 use DateTimeImmutable;
-use Isureal\Database;
 use Isureal\Http\ApiError;
 use Isureal\Http\Input;
 use Isureal\Http\Json;
@@ -93,20 +92,16 @@ final readonly class MemoryHandler
         if ($items === []) {
             return;
         }
-        [$in, $params] = Database::inClause('post', array_map(strval(...), array_keys($items)));
+        $postIds = array_map(strval(...), array_keys($items));
 
-        $reactions = $this->realMojis->selectCurrent("AND r.post_id IN ({$in}) ORDER BY r.created_at DESC, r.id DESC", $params);
+        $reactions = $this->realMojis->selectCurrentForPosts($postIds);
         foreach ($reactions as [$reaction, $reactor]) {
-            if (count($items[$reaction->postId]['realmojis']) < 50) {
-                $items[$reaction->postId]['realmojis'][] = $reaction->toResponse($reactor);
-            }
+            $items[$reaction->postId]['realmojis'][] = $reaction->toResponse($reactor);
         }
 
-        $comments = $this->comments->selectWithAuthor("AND c.post_id IN ({$in}) ORDER BY c.created_at, c.id", $params);
+        $comments = $this->comments->selectWithAuthorForPosts($postIds);
         foreach ($comments as [$comment, $author]) {
-            if (count($items[$comment->postId]['comments']) < 50) {
-                $items[$comment->postId]['comments'][] = $comment->toResponse($author);
-            }
+            $items[$comment->postId]['comments'][] = $comment->toResponse($author);
         }
     }
 }
