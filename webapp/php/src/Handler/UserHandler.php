@@ -11,8 +11,6 @@ use Isureal\Http\Json;
 use Isureal\Http\Middleware\SessionMiddleware;
 use Isureal\Model\User;
 use Isureal\Repository\PostRepository;
-use Isureal\Repository\RelationshipRepository;
-use Isureal\Repository\UserRepository;
 use Normalizer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -21,9 +19,7 @@ final readonly class UserHandler
 {
     public function __construct(
         private Database $db,
-        private UserRepository $users,
         private PostRepository $posts,
-        private RelationshipRepository $relationships,
     ) {
     }
 
@@ -84,12 +80,25 @@ final readonly class UserHandler
     public function show(Request $request, Response $response, array $args): Response
     {
         $viewer = SessionMiddleware::session($request)->userId;
-        $user = $this->users->find($args['userId']) ?? throw new ApiError(404, 'relationship_not_found');
-        if ($this->relationships->isBlocked($viewer, $user->id)) {
+        // ユーザーと、ブロック・友達の関係を 1 回の SQL で調べる
+        $row = $this->db->fetchOne(
+            'SELECT ' . User::columns() . ",
+               EXISTS(
+                 SELECT 1 FROM block_relations
+                 WHERE (blocker_id = :viewer AND blocked_id = users.id) OR (blocker_id = users.id AND blocked_id = :viewer)
+               ) AS blocked,
+               EXISTS(
+                 SELECT 1 FROM friendships
+                 WHERE (user_low_id = :viewer AND user_high_id = users.id) OR (user_low_id = users.id AND user_high_id = :viewer)
+               ) AS friend
+             FROM users WHERE id = :id AND status = 'active'",
+            ['id' => $args['userId'], 'viewer' => $viewer],
+        ) ?? throw new ApiError(404, 'relationship_not_found');
+        $user = User::fromRow($row);
+        if ((bool) $row['blocked']) {
             throw new ApiError(404, 'relationship_not_found');
         }
-        $friends = $this->posts->friendIds($viewer);
-        if (!$user->isCertified() && !in_array($user->id, $friends, true)) {
+        if (!$user->isCertified() && !(bool) $row['friend']) {
             $user->bio = '';
         }
         return Json::respond($response, $user->toPublic());

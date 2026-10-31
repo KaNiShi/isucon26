@@ -80,12 +80,11 @@ final readonly class CommentRepository
 
     public function canComment(string $viewerId, string $postId): bool
     {
-        $found = $this->posts->findWithAuthor($postId);
+        $found = $this->posts->findForViewer($viewerId, $postId);
         if ($found === null) {
             return false;
         }
-        [$post] = $found;
-        $viewer = $this->posts->loadViewerForPost($viewerId, $post);
+        [$post, , $viewer] = $found;
         if ($viewer === null || !$viewer->canView($post) || $post->windowEndedAt !== null) {
             return false;
         }

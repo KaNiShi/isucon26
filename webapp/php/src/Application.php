@@ -8,7 +8,7 @@ use DI\ContainerBuilder;
 use Isureal\Http\ActionLog;
 use Isureal\Http\ErrorHandler;
 use Isureal\Http\Middleware\ActionLogMiddleware;
-use Isureal\Http\Middleware\IpBanMiddleware;
+use Isureal\Http\Middleware\RoutingErrorIpBanMiddleware;
 use Isureal\Model\Region;
 use Slim\App;
 use Slim\Factory\AppFactory;
@@ -42,7 +42,7 @@ final class Application
             $app->getRouteCollector()->setCacheFile($cache['routes']);
         }
         $app->addRoutingMiddleware();
-        $app->add(IpBanMiddleware::class);
+        $app->add(RoutingErrorIpBanMiddleware::class);
         $app->addErrorMiddleware(false, false, false)
             ->setDefaultErrorHandler(new ErrorHandler($app->getResponseFactory()));
         $app->add(new ActionLogMiddleware($app->getRouteResolver(), $container->get(ActionLog::class)));
