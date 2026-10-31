@@ -26,8 +26,7 @@ use Slim\ResponseEmitter;
  * GET /api/notifications
  *
  * 新しい通知が届くまで接続を保持し、届いたら 1 件送って閉じる（Server-Sent Events）。
- * 待つ間は php-fpm の worker を占有するので、DB には問い合わせのたびに接続し、
- * 待つ間は接続を持たない。
+ * 互換用の php-fpm 経路。通知を待つ間は DB 接続を保持しない。
  */
 final class NotificationStream
 {
@@ -49,8 +48,14 @@ final class NotificationStream
         $route = $request->getMethod() === 'GET' && $request->getUri()->getPath() === '/api/notifications' ? '/api/notifications' : null;
         try {
             [$session, $connectedAt] = $this->open($request);
-        } catch (\Throwable $e) {
+        } catch (ApiError $e) {
             $response = ErrorHandler::render(new Response(), $e);
+            new ResponseEmitter()->emit($response);
+            $this->log->write($request, $route, $response->getStatusCode(), $entry);
+            return;
+        } catch (\Throwable) {
+            error_log('[notifications] failed to authenticate request');
+            $response = Json::respond(new Response(), ['error' => 'service_unavailable'], 503);
             new ResponseEmitter()->emit($response);
             $this->log->write($request, $route, $response->getStatusCode(), $entry);
             return;
@@ -98,8 +103,8 @@ final class NotificationStream
         for ($polls = 1; !connection_aborted(); $polls++) {
             try {
                 $notification = $this->poll($session, $connectedAt);
-            } catch (\Throwable $e) {
-                error_log('failed to get notification: ' . $e);
+            } catch (\Throwable) {
+                error_log('[notifications] failed to poll notification');
                 return;
             }
             if ($notification === false) {
@@ -119,32 +124,24 @@ final class NotificationStream
     }
 
     /**
-     * 通知を 1 件探す。まだなければ null、通知を受けられないユーザーなら false
+     * 通知を 1 件探す。まだなければ null、通知を受けられないユーザーなら false。
+     * 後方互換経路でもユーザー状態と通知を1回の問い合わせで調べる。
      *
      * @return array<string, string>|false|null
      */
     private function poll(LoginSession $session, string $connectedAt): array|false|null
     {
         $db = Database::connect($this->config, persistent: false);
-        $user = new UserRepository($db)->find($session->userId);
-        if ($user === null || $user->region !== $session->region) {
+        $rows = NotificationBatch::check($db, [[
+            'subscription_id' => 1,
+            'user_id' => $session->userId,
+            'connected_at' => $connectedAt,
+            'session_region' => $session->region,
+        ]]);
+        $row = $rows[0] ?? null;
+        if ($row === null || $row['active_user_id'] === null || $row['user_region'] !== $session->region) {
             return false;
         }
-        $notification = $db->fetchOne(
-            'SELECT n.id, n.posting_window_id, w.region, n.created_at
-             FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
-             WHERE n.user_id = :user_id AND n.created_at > :connected_at AND w.ended_at IS NULL
-             ORDER BY n.created_at, n.id LIMIT 1',
-            ['user_id' => $session->userId, 'connected_at' => $connectedAt],
-        );
-        if ($notification === null) {
-            return null;
-        }
-        return [
-            'id' => $notification['id'],
-            'postingWindowId' => $notification['posting_window_id'],
-            'region' => $notification['region'],
-            'createdAt' => Time::format(Time::fromDb($notification['created_at'])),
-        ];
+        return NotificationEvent::fromRow($row);
     }
 }
