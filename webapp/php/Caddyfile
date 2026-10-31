@@ -3,13 +3,6 @@
 	frankenphp {
 		# 通知（SSE）は届くまで接続を保持するので、php-fpm の www(16) + notifications(256) 相当のスレッドを確保する
 		num_threads 272
-		# 通常の API は Worker で処理する（通知 SSE は match に当たらないので従来どおり）
-		worker {
-			file public/worker.php
-			num 2
-			match /index.php
-			env MAX_REQUESTS 10000
-		}
 		php_ini memory_limit 512M
 		php_ini post_max_size 64M
 		php_ini upload_max_filesize 32M
@@ -30,6 +23,14 @@
 
 		php_server {
 			file_server off
+			# 通常の API は Worker で処理する（match は php_server の中でだけ使える）。
+			# 通知 SSE は /notifications.php に当たり match しないので、従来どおり通常のスレッドで処理される
+			worker {
+				file public/worker.php
+				num 2
+				match /index.php
+				env MAX_REQUESTS 10000
+			}
 		}
 	}
 }
