@@ -20,3 +20,4 @@
 /.ssh
 /.viminfo
 /local
+/env.sh
