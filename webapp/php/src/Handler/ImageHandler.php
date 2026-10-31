@@ -98,7 +98,9 @@ final readonly class ImageHandler
             $this->cache->put($imageId, $createdAt, $data);
         }
 
-        return $response->withHeader('X-Accel-Redirect', $this->cache->path($imageId, $createdAt));
+        return $response
+            ->withHeader('X-Accel-Redirect', $this->cache->path($imageId, $createdAt))
+            ->withHeader('Content-Type', $meta['media_type']);
     }
 
     private static function forbidden(): ApiError
