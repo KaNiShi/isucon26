@@ -19,10 +19,10 @@ final class Application
      * @param array<string, mixed> $definitions app/dependencies.php を上書きする定義（テスト用）
      * @return App<\DI\Container>
      */
-    public static function create(array $definitions = [], ?string $cacheDirectory = null): App
+    public static function create(array $definitions = [], ?string $cacheDirectory = null, bool $useCache = true): App
     {
         // テスト等の差し替え定義を、本番用のコンパイル済みコンテナへ混ぜない。
-        $cache = $definitions === [] ? ApplicationCache::load($cacheDirectory ?? ApplicationCache::directory()) : null;
+        $cache = $useCache && $definitions === [] ? ApplicationCache::load($cacheDirectory ?? ApplicationCache::directory()) : null;
         if ($cache === null) {
             $builder = new ContainerBuilder();
             $builder->addDefinitions(__DIR__ . '/../app/dependencies.php', $definitions);

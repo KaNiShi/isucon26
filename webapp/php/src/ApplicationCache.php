@@ -17,7 +17,7 @@ final class ApplicationCache
     }
 
     /**
-     * 生成済みの同じ世代の DI とルートだけを読む。HTTP リクエストでは生成しない。
+     * 生成済みの同じ世代の DI とルートだけを読む。通常リクエストでは生成しない。
      *
      * @return array{container: Container, routes: string}|null
      */
@@ -42,7 +42,8 @@ final class ApplicationCache
     }
 
     /**
-     * デプロイ前に実行する。DB に接続せず、設定値・利用者データもキャッシュしない。
+     * initialize 成功時、またはデプロイ前に実行する。この処理自体は DB に接続しない。
+     * 設定値・利用者データもキャッシュしない。
      * 完成してから current を切り替えるので、生成失敗時も前の世代を使える。
      */
     public static function warmup(string $directory): void
