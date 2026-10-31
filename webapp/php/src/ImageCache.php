@@ -38,6 +38,15 @@ final readonly class ImageCache
         return new self($config->imageCacheDir);
     }
 
+    public function exists(string $imageId, string $createdAt): bool
+    {
+        if ($this->dir === '') {
+            return false;
+        }
+
+        return file_exists($this->path($imageId, $createdAt));
+    }
+
     public function get(string $imageId, string $createdAt): ?string
     {
         if ($this->dir === '') {
@@ -73,13 +82,13 @@ final readonly class ImageCache
         if ($tmp === false) {
             return;
         }
-        $content = hash('xxh128', $data, true) . $data;
+        $content = $data;
         if (@file_put_contents($tmp, $content) !== strlen($content) || !@rename($tmp, $path)) {
             @unlink($tmp);
         }
     }
 
-    private function path(string $imageId, string $createdAt): string
+    public function path(string $imageId, string $createdAt): string
     {
         $key = hash('sha256', "{$imageId}\0{$createdAt}");
         return $this->dir . '/' . substr($key, 0, 2) . '/' . $key;
