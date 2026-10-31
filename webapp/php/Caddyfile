@@ -3,7 +3,7 @@
 	frankenphp {
 		# スレッドはそれぞれ DB への接続を持ち続ける（通知の SSE は待つ間さらに 1 本使う）。
 		# 多すぎると DB サーバーのメモリが足りなくなるので、通知を待つ分を見込みつつ絞る
-		num_threads 128
+		num_threads 160
 		php_ini memory_limit 512M
 		php_ini post_max_size 64M
 		php_ini upload_max_filesize 32M
@@ -18,12 +18,17 @@
 	route {
 		# /api/notifications だけ別の入口（SSE）に送り、それ以外は Slim の入口へ
 		@notifications path /api/notifications
-		rewrite @notifications /notifications.php
-		@api not path /notifications.php
+		rewrite @notifications /notifications-worker.php
+		@api not path /notifications-worker.php
 		rewrite @api /index.php
 
 		php_server {
 			file_server off
+			worker {
+			    file /home/isucon/webapp/php/public/notifications-worker.php
+                match /notifications-worker.php
+                num 128
+			}
 		}
 	}
 
