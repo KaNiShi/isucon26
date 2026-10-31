@@ -41,6 +41,17 @@ final readonly class UserRepository
         }
     }
 
+    /**
+     * ユーザーの行を共有ロック（FOR SHARE）する。ユーザーがいなければ例外。
+     * 共有ロックどうしは待たないが、FOR NO KEY UPDATE（関係の変更・投稿の更新や削除・退会）とは順番になる
+     */
+    public function mustLockShared(string $userId): void
+    {
+        if ($this->db->fetchValue('SELECT id FROM users WHERE id = :id FOR SHARE', ['id' => $userId]) === null) {
+            throw new \RuntimeException('failed to lock user: sql: no rows in result set');
+        }
+    }
+
     public function mustFind(string $userId): User
     {
         return $this->find($userId) ?? throw new \RuntimeException('sql: no rows in result set');

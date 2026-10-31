@@ -42,8 +42,13 @@ final readonly class CommentHandler
         $actor = SessionMiddleware::session($request)->userId;
         $post = $this->posts->find($args['postId']) ?? throw new ApiError(403, 'interaction_forbidden');
         [$comment, $user] = $this->db->transaction(function (Database $db) use ($actor, $post, $body): array {
+            // 自分は FOR NO KEY UPDATE、投稿者は FOR SHARE でロックする（同じ投稿者へのコメントどうしは待たせない）
             foreach (array_unique(Ids::ordered($actor, $post->authorId)) as $id) {
-                $this->users->mustLock($id);
+                if ($id === $actor) {
+                    $this->users->mustLock($id);
+                } else {
+                    $this->users->mustLockShared($id);
+                }
             }
             if (!$this->comments->canComment($actor, $post->id)) {
                 throw new ApiError(403, 'interaction_forbidden');
