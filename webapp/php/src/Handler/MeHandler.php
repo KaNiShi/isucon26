@@ -111,7 +111,7 @@ final readonly class MeHandler
      */
     private const string LOCK_USER_WITH_PROFILE_IMAGE =
         'SELECT u.profile_image_id, i.created_at AS image_created_at
-         FROM users u LEFT JOIN image_objects i ON i.id = u.profile_image_id
+         FROM users u LEFT JOIN image_metas i ON i.id = u.profile_image_id
          WHERE u.id = :id
          FOR NO KEY UPDATE OF u';
 

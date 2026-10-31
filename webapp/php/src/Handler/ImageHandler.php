@@ -65,6 +65,7 @@ final readonly class ImageHandler
         }
 
         // IP BAN、署名の鍵、削除状態を 1 回の問い合わせで確かめる。本体（data）はここでは読まない。
+        // image_objects ではなく、パーティションに分けていない写し image_metas を id で引く。
         // 削除状態は毎回 DB で確認する。即時反映も5秒以内の許容範囲に含まれる。
         $meta = $this->db->fetchOne(
             "SELECT b.banned, m.secret_key_hash, m.media_type, m.created_at, m.visible
@@ -85,7 +86,7 @@ final readonly class ImageHandler
                  ),
                  false
                ) AS visible
-             FROM image_objects i JOIN users u ON u.id = i.owner_user_id
+             FROM image_metas i JOIN users u ON u.id = i.owner_user_id
              WHERE i.id = :id AND u.status = 'active'
              ) m ON true",
             ['id' => $imageId, 'ip' => ClientIp::of($request)],
