@@ -14,6 +14,8 @@ final readonly class Config
         public string $dbPassword = 'isureal',
         public string $dbName = 'isureal',
         public string $logLevel = 'debug',
+        // 画像本体のキャッシュを置くディレクトリ。空文字列なら使わない
+        public string $imageCacheDir = '',
     ) {
     }
 
@@ -27,6 +29,7 @@ final readonly class Config
             dbPassword: self::env('ISUREAL_DB_PASSWORD', 'isureal'),
             dbName: self::env('ISUREAL_DB_NAME', 'isureal'),
             logLevel: self::env('ISUREAL_LOG_LEVEL', 'debug'),
+            imageCacheDir: self::imageCacheDirFromEnv(),
         );
     }
 
@@ -39,6 +42,15 @@ final readonly class Config
             $this->dbPort,
             $this->dbName,
         );
+    }
+
+    /**
+     * ISUREAL_IMAGE_CACHE_DIR が off ならキャッシュを使わない。未設定なら一時ディレクトリの下に置く
+     */
+    private static function imageCacheDirFromEnv(): string
+    {
+        $dir = self::env('ISUREAL_IMAGE_CACHE_DIR', sys_get_temp_dir() . '/isureal-image-cache');
+        return $dir === 'off' ? '' : rtrim($dir, '/');
     }
 
     private static function env(string $key, string $default): string

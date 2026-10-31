@@ -1,8 +1,12 @@
-.PHONY: install run test lint
+.PHONY: install cache-warmup run test lint
 
 # 依存パッケージを composer.lock のとおりに vendor/ へ入れる
 install:
 	composer install --no-dev --optimize-autoloader --no-interaction
+	$(MAKE) cache-warmup
+
+cache-warmup:
+	php bin/warmup-cache.php
 
 # php-fpm をフォアグラウンドで起動する（nginx が :8080 で受けて FastCGI で渡す）
 run:
