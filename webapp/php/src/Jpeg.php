@@ -20,8 +20,12 @@ final class Jpeg
         // imagecreatefromstring() は JPEG 以外も受理し、GD の構成によっては
         // JPEG の警告も無視する。既存の JPEG デコーダと警告設定を維持する。
         ini_set('gd.jpeg_ignore_warning', '0');
-        $info = getimagesizefromstring($data);
-        return $info ? [$info[0], $info[1]] : null;
+        $info = @getimagesizefromstring($data);
+        if ($info === false || $info[2] !== IMAGETYPE_JPEG || $info[0] < 1 || $info[1] < 1) {
+            return null;
+        }
+
+        // ヘッダーに寸法があっても、画像本体が壊れていれば拒否する。
 
         $path = tempnam(sys_get_temp_dir(), 'jpeg') ?: throw new \RuntimeException('failed to create a temporary file');
         try {

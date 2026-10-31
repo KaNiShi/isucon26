@@ -26,6 +26,8 @@ final class JpegTest extends TestCase
         ob_start();
         imagegif($image);
         $gif = (string) ob_get_clean();
+        $scan = strpos($jpeg, "\xff\xda");
+        self::assertNotFalse($scan);
 
         $cases = [
             'baseline' => $jpeg,
@@ -39,6 +41,7 @@ final class JpegTest extends TestCase
             'leading garbage' => 'x' . $jpeg,
             'trailing data' => $jpeg . str_repeat('x', 8192),
             'missing EOI' => substr($jpeg, 0, -2),
+            'header only with dimensions' => substr($jpeg, 0, $scan),
         ];
         foreach ($cases as $name => $data) {
             self::assertSame(self::originalSize($data), Jpeg::size($data), $name);
