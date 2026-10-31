@@ -79,16 +79,17 @@ final readonly class MeHandler
         if (($request->getHeader('Content-Type')[0] ?? '') !== 'image/jpeg') {
             throw new ApiError(415, 'unsupported_media_type');
         }
-        $data = (string) $request->getBody();
-        $size = Jpeg::size($data);
-        if ($size === null) {
+        $head = Jpeg::sizeFromStream($request->getBody());
+        if ($head === null) {
             ActionLogEntry::of($request)->abuse = 'invalid_image';
             throw new ApiError(400, 'invalid_profile_image');
         }
-        [$width, $height] = $size;
+        [$width, $height] = $head;
         if ($width > 512 || $height > 512) {
             throw new ApiError(400, 'invalid_profile_image');
         }
+
+        $data = (string) $request->getBody();
         $userId = SessionMiddleware::session($request)->userId;
         $this->db->transaction(function (Database $db) use ($userId, $data): void {
             $row = $db->fetchOne('SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $userId])
