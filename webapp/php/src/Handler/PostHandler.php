@@ -115,8 +115,10 @@ final readonly class PostHandler
     public function myCurrent(Request $request, Response $response): Response
     {
         $userId = SessionMiddleware::session($request)->userId;
-        $postId = $this->db->fetchValue(
-            'SELECT p.id FROM posts p
+        // 投稿と投稿者を 1 回の SQL で取る
+        $row = $this->db->fetchOne(
+            'SELECT ' . Post::COLUMNS . ', ' . User::columnsAs('u', 'author') . '
+             FROM posts p
              JOIN posting_windows w ON w.id = p.posting_window_id
              JOIN users u ON u.id = p.author_id
              JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
@@ -124,9 +126,11 @@ final readonly class PostHandler
              WHERE p.author_id = :author_id AND p.deleted_at IS NULL',
             ['author_id' => $userId],
         ) ?? throw new ApiError(404, 'post_not_found');
-        $post = $this->posts->find($postId) ?? throw new ApiError(404, 'post_not_found');
-        $user = $this->users->mustFind($userId);
-        return Json::respond($response, $post->toResponse($user));
+        $user = User::fromRow($row, 'author.');
+        if ($user->status !== 'active') {
+            throw new \RuntimeException('sql: no rows in result set');
+        }
+        return Json::respond($response, Post::fromRow($row)->toResponse($user));
     }
 
     /**
@@ -136,8 +140,8 @@ final readonly class PostHandler
      */
     public function show(Request $request, Response $response, array $args): Response
     {
-        [$post, $author] = $this->posts->findWithAuthor($args['postId']) ?? throw new ApiError(404, 'post_not_found');
-        $viewer = $this->posts->loadViewerForPost(SessionMiddleware::session($request)->userId, $post);
+        [$post, $author, $viewer] = $this->posts->findForViewer(SessionMiddleware::session($request)->userId, $args['postId'])
+            ?? throw new ApiError(404, 'post_not_found');
         if ($viewer === null || !$viewer->canView($post)) {
             throw new ApiError(404, 'post_not_found');
         }
