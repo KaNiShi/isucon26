@@ -37,6 +37,17 @@ final class Database
     }
 
     /**
+     * リクエストの終わりに呼ぶ。Worker モードでは接続を次のリクエストへ持ち越すので、
+     * 途中で終わったトランザクションが残っていれば捨てる
+     */
+    public function reset(): void
+    {
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
+    }
+
+    /**
      * @param array<string, mixed> $params
      * @return array<string, mixed>|null
      */
