@@ -1,8 +1,9 @@
 {
 	auto_https off
 	frankenphp {
-		# 通知（SSE）は届くまで接続を保持するので、php-fpm の www(16) + notifications(256) 相当のスレッドを確保する
-		num_threads 272
+		# スレッドはそれぞれ DB への接続を持ち続ける（通知の SSE は待つ間さらに 1 本使う）。
+		# 多すぎると DB サーバーのメモリが足りなくなるので、通知を待つ分を見込みつつ絞る
+		num_threads 128
 		php_ini memory_limit 512M
 		php_ini post_max_size 64M
 		php_ini upload_max_filesize 32M
