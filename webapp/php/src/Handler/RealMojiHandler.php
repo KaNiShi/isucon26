@@ -57,31 +57,29 @@ final readonly class RealMojiHandler
             throw new ApiError(403, 'interaction_forbidden');
         }
 
-        [$reaction, $user] = $this->db->transaction(function (Database $db) use ($actor, $post, $data, $reactionType): array {
-            $imageId = Ids::generate();
-            $db->execute(
-                "INSERT INTO image_objects (id, owner_user_id, data, media_type) VALUES (:id, :owner_user_id, :data, 'image/jpeg')",
-                ['id' => $imageId, 'owner_user_id' => $actor, 'data' => new Bytea($data)],
-            );
+        $imageId = Ids::generate();
+        $this->db->execute(
+            "INSERT INTO image_objects (id, owner_user_id, data, media_type) VALUES (:id, :owner_user_id, :data, 'image/jpeg')",
+            ['id' => $imageId, 'owner_user_id' => $actor, 'data' => new Bytea($data)],
+        );
 
-            return $this->db->transaction(function (Database $db) use ($actor, $post, $data, $reactionType, $imageId): array {
-                $this->relationships->lockPair($actor, $post->authorId);
-                if (!$this->posts->canView($actor, $post->id)) {
-                    throw new ApiError(403, 'interaction_forbidden');
-                }
-                $db->execute(
-                    'UPDATE realmojis SET replaced_at = clock_timestamp()
+        [$reaction, $user] =  $this->db->transaction(function (Database $db) use ($actor, $post, $data, $reactionType, $imageId): array {
+            $this->relationships->lockPair($actor, $post->authorId);
+            if (!$this->posts->canView($actor, $post->id)) {
+                throw new ApiError(403, 'interaction_forbidden');
+            }
+            $db->execute(
+                'UPDATE realmojis SET replaced_at = clock_timestamp()
                  WHERE post_id = :post_id AND reactor_id = :reactor_id AND replaced_at IS NULL AND deleted_at IS NULL',
-                    ['post_id' => $post->id, 'reactor_id' => $actor],
-                );
-                $id = Ids::generate();
-                $db->execute(
-                    'INSERT INTO realmojis (id, post_id, reactor_id, image_id, reaction_type, created_at)
+                ['post_id' => $post->id, 'reactor_id' => $actor],
+            );
+            $id = Ids::generate();
+            $db->execute(
+                'INSERT INTO realmojis (id, post_id, reactor_id, image_id, reaction_type, created_at)
                  VALUES (:id, :post_id, :reactor_id, :image_id, :reaction_type, clock_timestamp())',
-                    ['id' => $id, 'post_id' => $post->id, 'reactor_id' => $actor, 'image_id' => $imageId, 'reaction_type' => $reactionType],
-                );
-                return [$this->realMojis->mustFind($id), $this->users->mustFind($actor)];
-            });
+                ['id' => $id, 'post_id' => $post->id, 'reactor_id' => $actor, 'image_id' => $imageId, 'reaction_type' => $reactionType],
+            );
+            return [$this->realMojis->mustFind($id), $this->users->mustFind($actor)];
         });
         return Json::respond($response, $reaction->toResponse($user), 201);
     }
