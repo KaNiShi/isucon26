@@ -91,7 +91,7 @@ final readonly class MeHandler
         }
         $userId = SessionMiddleware::session($request)->userId;
         $this->db->transaction(function (Database $db) use ($userId, $data): void {
-            $row = $db->fetchOne('SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $userId])
+            $row = $db->fetchOne(self::LOCK_USER_WITH_PROFILE_IMAGE, ['id' => $userId])
                 ?? throw new ApiError(404, 'account_not_found');
             $imageId = Ids::generate();
             $db->execute(
@@ -99,11 +99,33 @@ final readonly class MeHandler
                 ['id' => $imageId, 'owner_user_id' => $userId, 'data' => new Bytea($data)],
             );
             $db->execute('UPDATE users SET profile_image_id = :image_id, updated_at = clock_timestamp() WHERE id = :id', ['id' => $userId, 'image_id' => $imageId]);
-            if ($row['profile_image_id'] !== null) {
-                $db->execute('DELETE FROM image_objects WHERE id = :id', ['id' => $row['profile_image_id']]);
-            }
+            self::deleteImage($db, $row['profile_image_id'], $row['image_created_at']);
         });
         return Json::noContent($response);
+    }
+
+    /**
+     * ユーザーの行をロックし、今のプロフィール画像の ID と作成時刻を返す。
+     * 作成時刻があれば、削除をその画像のパーティションだけに絞り込める
+     */
+    private const string LOCK_USER_WITH_PROFILE_IMAGE =
+        'SELECT u.profile_image_id, i.created_at AS image_created_at
+         FROM users u LEFT JOIN image_objects i ON i.id = u.profile_image_id
+         WHERE u.id = :id
+         FOR NO KEY UPDATE OF u';
+
+    /**
+     * 画像を消す。created_at も条件に入れて、image_objects の 1 つのパーティションだけを見るようにする
+     */
+    private static function deleteImage(Database $db, ?string $imageId, ?string $createdAt): void
+    {
+        if ($imageId === null || $createdAt === null) {
+            return;
+        }
+        $db->execute(
+            'DELETE FROM image_objects WHERE id = :id AND created_at = :created_at',
+            ['id' => $imageId, 'created_at' => $createdAt],
+        );
     }
 
     /**
@@ -113,10 +135,12 @@ final readonly class MeHandler
     {
         $userId = SessionMiddleware::session($request)->userId;
         $this->db->transaction(function (Database $db) use ($userId): void {
-            $imageId = $db->fetchValue('SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $userId])
-                ?? throw new ApiError(404, 'account_not_found');
+            $row = $db->fetchOne(self::LOCK_USER_WITH_PROFILE_IMAGE, ['id' => $userId]);
+            if ($row === null || $row['profile_image_id'] === null) {
+                throw new ApiError(404, 'account_not_found');
+            }
             $db->execute('UPDATE users SET profile_image_id = NULL, updated_at = clock_timestamp() WHERE id = :id', ['id' => $userId]);
-            $db->execute('DELETE FROM image_objects WHERE id = :id', ['id' => $imageId]);
+            self::deleteImage($db, $row['profile_image_id'], $row['image_created_at']);
         });
         return Json::noContent($response);
     }
