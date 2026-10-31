@@ -25,4 +25,20 @@
 			file_server off
 		}
 	}
+
+    request_header X-Sendfile-Type x-accel-redirect
+
+    intercept {
+        @accel header X-Accel-Redirect *
+        handle_response @accel {
+            root /
+            rewrite * {resp.header.X-Accel-Redirect}
+            method * GET
+
+            # セキュリティ強化のため、 PHP によって設定された X-Accel-Redirect ヘッダーを削除
+            header -X-Accel-Redirect
+
+            file_server
+        }
+    }
 }
