@@ -37,6 +37,7 @@ return [
     Middleware\AdminSessionMiddleware::class => autowire(),
     Middleware\IpBanMiddleware::class => autowire(),
     Middleware\RegionMiddleware::class => autowire(),
+    Middleware\RoutingErrorIpBanMiddleware::class => autowire(),
     Middleware\SessionMiddleware::class => autowire(),
     Repository\AdminSessionRepository::class => autowire(),
     Repository\CommentRepository::class => autowire(),

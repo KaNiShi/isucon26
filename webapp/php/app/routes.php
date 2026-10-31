@@ -18,6 +18,7 @@ use Isureal\Handler\RealMojiHandler;
 use Isureal\Handler\RelationshipHandler;
 use Isureal\Handler\UserHandler;
 use Isureal\Http\Middleware\AdminSessionMiddleware;
+use Isureal\Http\Middleware\IpBanMiddleware;
 use Isureal\Http\Middleware\RegionMiddleware;
 use Isureal\Http\Middleware\SessionMiddleware;
 use Slim\App;
@@ -29,11 +30,15 @@ return function (App $app): void {
         $api->post('/initialize', InitializeHandler::class);
         $api->post('/auth/register', [AuthHandler::class, 'register']);
         $api->post('/auth/login', [AuthHandler::class, 'login']);
-        $api->get('/images/{imageId}', [ImageHandler::class, 'show']);
+    })->add(IpBanMiddleware::class);
+    // IP BAN は ImageHandler が署名の鍵と一緒に確かめる。
+    // ルートの番号はルートのキャッシュに残るので、定義する順は変えない
+    $app->get('/api/images/{imageId}', [ImageHandler::class, 'show']);
+    $app->group('/api', function (RouteCollectorProxy $api): void {
         $api->post('/admin/auth/login', [AdminHandler::class, 'login']);
-    });
+    })->add(IpBanMiddleware::class);
 
-    // ログインが必要
+    // ログインが必要。IP BAN は SessionMiddleware がセッションと一緒に確かめる
     $app->group('/api', function (RouteCollectorProxy $api): void {
         $api->post('/auth/logout', [AuthHandler::class, 'logout']);
         $api->patch('/me', [MeHandler::class, 'update']);
@@ -79,5 +84,5 @@ return function (App $app): void {
         $admin->put('/users/{userId}/certification', [AdminHandler::class, 'certifyUser']);
         $admin->delete('/users/{userId}/certification', [AdminHandler::class, 'deleteUserCertification']);
         $admin->post('/posting-window', [AdminHandler::class, 'openPostingWindow']);
-    })->add(AdminSessionMiddleware::class);
+    })->add(AdminSessionMiddleware::class)->add(IpBanMiddleware::class);
 };
