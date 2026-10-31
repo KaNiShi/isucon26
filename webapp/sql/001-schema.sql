@@ -83,6 +83,8 @@ CREATE TABLE users (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 ALTER TABLE image_objects ADD CONSTRAINT image_objects_owner_fk FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT;
+-- ログイン・登録でユーザー名から探す
+CREATE INDEX users_username ON users(username);
 
 -- 2026-09-10 管理者を消す時のオペレーションはどうすればよいですか？
 -- 2026-09-13 消すことは想定されていません
@@ -102,6 +104,10 @@ CREATE TABLE login_sessions (
   invalidated_at timestamptz,
   reason text
 );
+-- ログインが必要なリクエストのたびにトークンから探す
+CREATE INDEX login_sessions_token_hash ON login_sessions(token_hash);
+-- ログイン・退会でユーザーの有効なセッションを無効にする
+CREATE INDEX login_sessions_user_id ON login_sessions(user_id) WHERE active;
 
 CREATE TABLE administrator_sessions (
   id varchar(36) PRIMARY KEY,
@@ -121,6 +127,8 @@ CREATE TABLE friendships (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE(user_low_id,user_high_id)
 );
+-- user_low_id = :id OR user_high_id = :id の後半用
+CREATE INDEX friendships_user_high_id ON friendships(user_high_id);
 
 CREATE TABLE follows (
   id varchar(36) PRIMARY KEY,
@@ -130,6 +138,8 @@ CREATE TABLE follows (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE(follower_id,followee_id)
 );
+-- フォロワー一覧
+CREATE INDEX follows_followee_id ON follows(followee_id);
 
 CREATE TABLE block_relations (
   id varchar(36) PRIMARY KEY,
@@ -138,6 +148,8 @@ CREATE TABLE block_relations (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE(blocker_id,blocked_id)
 );
+-- blocker_id = :id OR blocked_id = :id の後半用
+CREATE INDEX block_relations_blocked_id ON block_relations(blocked_id);
 
 CREATE TABLE posting_windows (
   id varchar(36) PRIMARY KEY,
@@ -168,6 +180,8 @@ CREATE TABLE posts (
 );
 CREATE INDEX posts_author_id ON posts(author_id);
 CREATE INDEX posts_posting_window_id ON posts(posting_window_id);
+-- 画像の取得で、画像が削除されていない投稿のものか確かめる
+CREATE INDEX posts_image_id ON posts(image_id);
 
 CREATE TABLE friend_requests (
   id varchar(36) PRIMARY KEY,
@@ -177,6 +191,9 @@ CREATE TABLE friend_requests (
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL
 );
+-- 受け取った申請・送った申請の一覧
+CREATE INDEX friend_requests_recipient_id_status ON friend_requests(recipient_id, status);
+CREATE INDEX friend_requests_requester_id_status ON friend_requests(requester_id, status);
 
 CREATE TABLE realmojis (
   id varchar(36) PRIMARY KEY,
@@ -190,6 +207,8 @@ CREATE TABLE realmojis (
 );
 CREATE UNIQUE INDEX realmojis_one_active ON realmojis(post_id,reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX realmojis_post_id ON realmojis(post_id);
+-- 画像の取得で、画像が有効な RealMoji のものか確かめる
+CREATE INDEX realmojis_image_reactor_active ON realmojis(image_id, reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 
 CREATE TABLE comments (
   id varchar(36) PRIMARY KEY,
