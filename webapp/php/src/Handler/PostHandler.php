@@ -61,7 +61,11 @@ final readonly class PostHandler
         [$post, $user] = $this->db->transaction(function (Database $db) use ($userId, $imageData, $caption, $visibility, $location): array {
             $this->users->mustLock($userId);
             $user = $this->users->mustFind($userId);
-            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR UPDATE';
+            // 投稿期間の行は FOR SHARE で読む。同じリージョンの投稿どうしは待ち合わせず、
+            // 投稿期間を閉じる UPDATE（POST /api/admin/posting-window）とは待ち合う。
+            // 1 人 1 投稿の確認は、上でロックしたユーザーの行で守る。
+            // 待っている間に投稿期間が閉じられると行が返らないので、新しい投稿期間を読み直す。
+            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR SHARE';
             $window = $db->fetchOne($sql, ['region' => $user->region]);
             $window ??= $db->fetchOne($sql, ['region' => $user->region]);
             if ($window === null) {
