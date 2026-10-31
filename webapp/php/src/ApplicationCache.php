@@ -33,7 +33,7 @@ final class ApplicationCache
         $class = 'IsurealCompiledContainer_' . $generation;
         $path = $directory . '/' . $generation;
         if (!is_file($path . '/' . $class . '.php') || !is_file($path . '/routes.php')) {
-            throw new RuntimeException('incomplete application cache; run cache warmup before deployment');
+            throw new RuntimeException('incomplete application cache; run initialize to regenerate');
         }
         require_once $path . '/' . $class . '.php';
         /** @var Container $container */
@@ -42,7 +42,7 @@ final class ApplicationCache
     }
 
     /**
-     * initialize 成功時、またはデプロイ前に実行する。この処理自体は DB に接続しない。
+     * initialize の DB 初期化成功後に実行する。この処理自体は DB に接続しない。
      * 設定値・利用者データもキャッシュしない。
      * 完成してから current を切り替えるので、生成失敗時も前の世代を使える。
      */
