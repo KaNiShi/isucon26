@@ -98,7 +98,7 @@ final readonly class ImageHandler
             throw self::forbidden();
         }
         $key = ImageSignature::signingKey($meta['secret_key_hash']);
-        if (!hash_equals(ImageSignature::sign($key, $imageId, $expiresAt), $signature)) {
+        if (!ImageSignature::verify($key, $imageId, $expiresAt, $signature)) {
             ActionLogEntry::of($request)->abuse = 'invalid_signature';
             throw self::forbidden();
         }
