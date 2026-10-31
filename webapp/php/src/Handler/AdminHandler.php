@@ -129,6 +129,8 @@ final readonly class AdminHandler
                  SELECT gen_random_uuid()::text, id, :window_id, :created_at FROM users WHERE region = :region AND status = 'active'",
                 ['region' => $region, 'window_id' => $windowId, 'created_at' => Time::toDb($startsAt)],
             );
+            // 待機中の GET /api/notifications を起こす。NOTIFY はコミット時に配信される
+            $db->execute("SELECT pg_notify('notifications', :region)", ['region' => $region]);
             return $this->windows->mustFind($windowId);
         });
         return Json::respond($response, $window->toResponse(), 201);

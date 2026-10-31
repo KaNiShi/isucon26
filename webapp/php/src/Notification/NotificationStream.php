@@ -26,17 +26,17 @@ use Slim\ResponseEmitter;
  * GET /api/notifications
  *
  * 新しい通知が届くまで接続を保持し、届いたら 1 件送って閉じる（Server-Sent Events）。
- * 待つ間は php-fpm の worker を占有するので、DB には問い合わせのたびに接続し、
- * 待つ間は接続を持たない。
+ * 待つ間は worker を占有する。DB は LISTEN して NOTIFY で起こされるのを待つので、
+ * 待つ間に定期的な問い合わせはしない（NOTIFY は AdminHandler が通知を作るときに送る）。
  */
 final class NotificationStream
 {
-    private const int POLL_INTERVAL_MICROSECONDS = 500_000;
+    private const string CHANNEL = 'notifications';
 
     /**
-     * 切断に気づけるよう、この回数だけ問い合わせるごとにコメント行を送る
+     * NOTIFY を待つ最長時間。切断に気づけるよう、届かなければコメント行を送る
      */
-    private const int PING_EVERY_POLLS = 10;
+    private const int WAIT_MILLISECONDS = 5_000;
 
     public function __construct(private readonly Config $config, private readonly ActionLog $log)
     {
@@ -48,21 +48,21 @@ final class NotificationStream
         $request = $request->withAttribute(ActionLogEntry::ATTRIBUTE, $entry);
         $route = $request->getMethod() === 'GET' && $request->getUri()->getPath() === '/api/notifications' ? '/api/notifications' : null;
         try {
-            [$session, $connectedAt] = $this->open($request);
+            [$db, $session, $connectedAt] = $this->open($request);
         } catch (\Throwable $e) {
             $response = ErrorHandler::render(new Response(), $e);
             new ResponseEmitter()->emit($response);
             $this->log->write($request, $route, $response->getStatusCode(), $entry);
             return;
         }
-        $this->stream($session, $connectedAt);
+        $this->stream($db, $session, $connectedAt);
         $this->log->write($request, $route, 200, $entry);
     }
 
     /**
      * リクエストとセッションを確かめ、通知を探し始める時刻を返す
      *
-     * @return array{LoginSession, string}
+     * @return array{Database, LoginSession, string}
      */
     private function open(ServerRequestInterface $request): array
     {
@@ -80,10 +80,10 @@ final class NotificationStream
         if ($session->region !== $this->config->region) {
             throw new ApiError(403, 'region_mismatch');
         }
-        return [$session, $db->fetchValue('SELECT clock_timestamp()')];
+        return [$db, $session, $db->fetchValue('SELECT clock_timestamp()')];
     }
 
-    private function stream(LoginSession $session, string $connectedAt): void
+    private function stream(Database $db, LoginSession $session, string $connectedAt): void
     {
         set_time_limit(0);
         while (ob_get_level() > 0) {
@@ -95,26 +95,32 @@ final class NotificationStream
         header('Content-Type: text/event-stream');
         flush();
 
-        for ($polls = 1; !connection_aborted(); $polls++) {
-            try {
-                $notification = $this->poll($session, $connectedAt);
-            } catch (\Throwable $e) {
-                error_log('failed to get notification: ' . $e);
-                return;
+        try {
+            // 接続してから LISTEN するまでの間に届いた通知は、最初の poll() で拾う
+            $db->listen(self::CHANNEL);
+            $shouldPoll = true;
+            while (!connection_aborted()) {
+                if ($shouldPoll) {
+                    $notification = $this->poll($db, $session, $connectedAt);
+                    if ($notification === false) {
+                        return;
+                    }
+                    if ($notification !== null) {
+                        echo 'data: ', Json::encode($notification), "\n\n";
+                        flush();
+                        return;
+                    }
+                }
+                $notify = $db->waitNotify(self::WAIT_MILLISECONDS);
+                if ($notify === null) {
+                    echo ": ping\n\n";
+                    flush();
+                }
+                // 他のリージョンの通知では起きても探さない。タイムアウト時は念のため探す
+                $shouldPoll = $notify === null || ($notify['payload'] ?? '') === $session->region;
             }
-            if ($notification === false) {
-                return;
-            }
-            if ($notification !== null) {
-                echo 'data: ', Json::encode($notification), "\n\n";
-                flush();
-                return;
-            }
-            usleep(self::POLL_INTERVAL_MICROSECONDS);
-            if ($polls % self::PING_EVERY_POLLS === 0) {
-                echo ": ping\n\n";
-                flush();
-            }
+        } catch (\Throwable $e) {
+            error_log('failed to get notification: ' . $e);
         }
     }
 
@@ -123,9 +129,8 @@ final class NotificationStream
      *
      * @return array<string, string>|false|null
      */
-    private function poll(LoginSession $session, string $connectedAt): array|false|null
+    private function poll(Database $db, LoginSession $session, string $connectedAt): array|false|null
     {
-        $db = Database::connect($this->config, persistent: false);
         $user = new UserRepository($db)->find($session->userId);
         if ($user === null || $user->region !== $session->region) {
             return false;
