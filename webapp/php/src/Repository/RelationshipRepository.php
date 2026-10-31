@@ -31,6 +31,25 @@ final readonly class RelationshipRepository
         }
     }
 
+    /**
+     * RealMoji を送る前に、自分と投稿者を ID の順にロックする。トランザクションの中で呼ぶ。
+     * 自分は FOR NO KEY UPDATE、投稿者は FOR SHARE にして、同じ投稿者への RealMoji・コメントどうしは待たせない。
+     * 関係の変更（lockPair）・投稿の更新や削除・退会は投稿者を FOR NO KEY UPDATE でロックするので、それらとは順番になる
+     */
+    public function lockForInteraction(string $actor, string $author): void
+    {
+        if ($actor === $author || $author === '') {
+            throw new ApiError(400, 'invalid_relationship');
+        }
+        foreach (Ids::ordered($actor, $author) as $id) {
+            $mode = $id === $actor ? 'FOR NO KEY UPDATE' : 'FOR SHARE';
+            $locked = $this->db->fetchValue("SELECT id FROM users WHERE id = :id AND status = 'active' {$mode}", ['id' => $id]);
+            if ($locked === null) {
+                throw new ApiError(404, 'relationship_not_found');
+            }
+        }
+    }
+
     public function isBlocked(string $actor, string $target): bool
     {
         return $this->db->fetchValue(

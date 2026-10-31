@@ -65,7 +65,7 @@ final readonly class RealMojiHandler
             );
 
             return $this->db->transaction(function (Database $db) use ($actor, $post, $data, $reactionType, $imageId): array {
-                $this->relationships->lockPair($actor, $post->authorId);
+                $this->relationships->lockForInteraction($actor, $post->authorId);
                 if (!$this->posts->canView($actor, $post->id)) {
                     throw new ApiError(403, 'interaction_forbidden');
                 }

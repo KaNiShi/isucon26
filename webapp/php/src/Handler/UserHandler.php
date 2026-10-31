@@ -44,31 +44,38 @@ final readonly class UserHandler
             throw new ApiError(400, 'invalid_pagination');
         }
         $viewer = SessionMiddleware::session($request)->userId;
-        $rows = $this->db->fetchAll(
-            'SELECT ' . User::columns() . " FROM users
-             WHERE status = 'active' AND id <> :viewer AND (:before_username = '' OR (username, id) > (:before_username, :before_id))
-             ORDER BY username, id",
-            ['viewer' => $viewer, 'before_username' => $beforeUsername, 'before_id' => $beforeId],
-        );
         $blocked = $this->posts->blockedUserIds($viewer);
         $query = self::normalizeSearchText($q);
         $items = [];
-        foreach ($rows as $row) {
-            $user = User::fromRow($row);
-            if (!str_contains(self::normalizeSearchText($user->username), $query) && !str_contains(self::normalizeSearchText($user->displayName), $query)) {
-                continue;
+        // 全員を一度に読まず、ユーザー名の順に少しずつ読んで、51 件そろったところでやめる。
+        // 一致の判定（大文字小文字のそろえ方）は SQL では同じにできないので PHP で行う
+        $chunk = 500;
+        do {
+            $rows = $this->db->fetchAll(
+                'SELECT ' . User::columns() . " FROM users
+                 WHERE status = 'active' AND id <> :viewer AND (:before_username = '' OR (username, id) > (:before_username, :before_id))
+                 ORDER BY username, id LIMIT {$chunk}",
+                ['viewer' => $viewer, 'before_username' => $beforeUsername, 'before_id' => $beforeId],
+            );
+            foreach ($rows as $row) {
+                $user = User::fromRow($row);
+                $beforeUsername = $user->username;
+                $beforeId = $user->id;
+                if (!str_contains(self::normalizeSearchText($user->username), $query) && !str_contains(self::normalizeSearchText($user->displayName), $query)) {
+                    continue;
+                }
+                if (isset($blocked[$user->id])) {
+                    continue;
+                }
+                if (!$user->isCertified()) {
+                    $user->bio = '';
+                }
+                $items[] = $user->toPublic();
+                if (count($items) === 51) {
+                    break 2;
+                }
             }
-            if (isset($blocked[$user->id])) {
-                continue;
-            }
-            if (!$user->isCertified()) {
-                $user->bio = '';
-            }
-            $items[] = $user->toPublic();
-            if (count($items) === 51) {
-                break;
-            }
-        }
+        } while (count($rows) === $chunk);
         return Json::respond($response, self::page($items));
     }
 
