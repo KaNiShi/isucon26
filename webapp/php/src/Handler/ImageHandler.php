@@ -83,10 +83,13 @@ final readonly class ImageHandler
         if ($meta['visible'] !== true) {
             throw self::forbidden();
         }
+        if ($expiresAt <= time()) {
+            throw self::forbidden();
+        }
 
         $createdAt = (string) $meta['created_at'];
-        $data = $this->cache->get($imageId, $createdAt);
-        if ($data === null) {
+        $exists = $this->cache->exists($imageId, $createdAt);
+        if (!$exists) {
             $value = $this->db->fetchValue(
                 'SELECT data FROM image_objects WHERE id = :id AND created_at = :created_at',
                 ['id' => $imageId, 'created_at' => $createdAt],
@@ -94,11 +97,8 @@ final readonly class ImageHandler
             $data = Bytea::read($value);
             $this->cache->put($imageId, $createdAt, $data);
         }
-        if ($expiresAt <= time()) {
-            throw self::forbidden();
-        }
-        $response->getBody()->write($data);
-        return $response->withHeader('Content-Type', $meta['media_type']);
+
+        return $response->withHeader('X-Accel-Redirect', $this->cache->path($imageId, $createdAt));
     }
 
     private static function forbidden(): ApiError
