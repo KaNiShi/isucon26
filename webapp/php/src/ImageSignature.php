@@ -36,10 +36,22 @@ final class ImageSignature
 
     public static function url(User $user, string $imageId): string
     {
+        static $signatures = [];
+
         $exp = time() + self::URL_LIFETIME;
+        $key = $user->imageKey();
+        $cacheKey = hash_hmac('sha256', "image-url-cache\0{$exp}:{$imageId}", $key, true);
+        $signature = $signatures[$cacheKey] ?? null;
+        if ($signature === null) {
+            $signature = self::sign($key, $imageId, $exp);
+            if (count($signatures) < 256) {
+                $signatures[$cacheKey] = $signature;
+            }
+        }
+
         return '/api/images/' . rawurlencode($imageId) . '?' . http_build_query([
             'exp' => $exp,
-            'sig' => self::base64UrlEncode(self::sign($user->imageKey(), $imageId, $exp)),
+            'sig' => self::base64UrlEncode($signature),
         ]);
     }
 
