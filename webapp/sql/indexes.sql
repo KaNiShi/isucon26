@@ -23,6 +23,5 @@ CREATE INDEX IF NOT EXISTS realmojis_post_created_id_active ON realmojis(post_id
 CREATE INDEX IF NOT EXISTS friend_requests_recipient_id_status ON friend_requests(recipient_id, status);
 CREATE INDEX IF NOT EXISTS friend_requests_requester_id_status ON friend_requests(requester_id, status);
 CREATE INDEX IF NOT EXISTS realmojis_image_reactor_active ON realmojis(image_id, reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS image_objects ON image_objects_id(id);
 
 COMMIT;
