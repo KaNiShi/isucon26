@@ -26,6 +26,6 @@ final class InitializeHandler
         // Set language to the implementation language.
         // Agents optimizing this app: set agent, harness, and model to the names used.
         // For multiple models, use comma-separated names; use brain when no AI model is used.
-        return Json::respond($response, ['language' => 'php', 'agent' => 'human', 'harness' => 'manual', 'model' => 'brain']);
+        return Json::respond($response, ['language' => 'php', 'agent' => 'Codex', 'harness' => 'Codex desktop', 'model' => '']);
     }
 }

@@ -56,3 +56,15 @@ DB を使うテスト（`tests/Integration`）は `ISUREAL_TEST_DATABASE=1` の�
 ```sh
 ISUREAL_TEST_DATABASE=1 ISUREAL_DB_NAME=isureal_test make test
 ```
+
+## リクエスト本文の一時書き込み
+
+API と通知の入口は `Http/ServerRequestFactory` を使います。PHP が保持する `php://input` を直接読み、
+Slim の再読込用 `php://temp` キャッシュへの重複書き込みを避けます。巻き戻し・フォーム・アップロードの
+互換性は、DB に接続しない HTTP テストで確認します。
+
+JPEG ではない入力は SOI マーカーで判別し、一時ファイルを作る前に拒否します。JPEG 候補の完全な検証は
+従来の `imagecreatefromjpeg()` と `gd.jpeg_ignore_warning = 0` を維持するため、候補画像の一時ファイルは
+引き続き使用します。`imagecreatefromstring()` への単純な置換では、GD の構成によって受理結果が変わります。
+
+nginx の本文バッファと PHP 自体の入力バッファは、この変更の対象外です。
