@@ -34,7 +34,7 @@ final readonly class ExportHandler
             'SELECT ' . Post::COLUMNS . ', i.created_at AS image_created_at
              FROM posts p
              JOIN posting_windows w ON w.id = p.posting_window_id
-             JOIN image_objects i ON i.id = p.image_id
+             JOIN image_metas i ON i.id = p.image_id
              WHERE p.author_id = :author_id AND p.deleted_at IS NULL
              ORDER BY p.posted_at, p.id',
             ['author_id' => $userId],
@@ -89,15 +89,24 @@ final readonly class ExportHandler
     {
         $missing = [];
         foreach ($rows as $row) {
-            if (!$this->cache->exists($row['image_id'], (string) $row['image_created_at'])) {
-                $missing[] = (string) $row['image_id'];
+            $createdAt = (string) $row['image_created_at'];
+            if (!$this->cache->exists($row['image_id'], $createdAt)) {
+                $missing[] = [(string) $row['image_id'], $createdAt];
             }
         }
         $notCached = [];
-        // 一度にメモリに載せる本体の量を抑えるため、少しずつ読む
-        foreach (array_chunk($missing, 16) as $ids) {
-            [$placeholders, $params] = Database::inClause('id', $ids);
-            foreach ($this->db->fetchAll("SELECT id, created_at, data FROM image_objects WHERE id IN ({$placeholders})", $params) as $image) {
+        // 一度にメモリに載せる本体の量を抑えるため、少しずつ読む。
+        // id と created_at で探すので、image_objects のパーティションを 1 つずつしか見ない
+        foreach (array_chunk($missing, 16) as $images) {
+            $pairs = [];
+            $params = [];
+            foreach ($images as $i => [$id, $createdAt]) {
+                $pairs[] = "(:id{$i}, :created_at{$i}::timestamptz)";
+                $params["id{$i}"] = $id;
+                $params["created_at{$i}"] = $createdAt;
+            }
+            $sql = 'SELECT id, created_at, data FROM image_objects WHERE (id, created_at) IN (' . implode(', ', $pairs) . ')';
+            foreach ($this->db->fetchAll($sql, $params) as $image) {
                 $createdAt = (string) $image['created_at'];
                 $data = Bytea::read($image['data']);
                 $this->cache->put($image['id'], $createdAt, $data);
