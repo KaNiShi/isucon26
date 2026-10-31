@@ -25,7 +25,7 @@
 		php_server {
 			file_server off
 			worker {
-			    file notifications-worker.php
+			    file /home/isucon/webapp/php/public/notifications-worker.php
                 match /notifications-worker.php
                 num 128
 			}
