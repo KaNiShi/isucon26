@@ -19,16 +19,21 @@ final class Database
 
     /**
      * @param bool $persistent php-fpm の worker ごとに接続を使い回すかどうか
+     * @param int|null $timeoutSeconds 接続タイムアウト秒数
      */
-    public static function connect(Config $config, bool $persistent = true): self
+    public static function connect(Config $config, bool $persistent = true, ?int $timeoutSeconds = null): self
     {
-        $pdo = new Pgsql($config->databaseDsn(), $config->dbUser, $config->dbPassword, [
+        $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_PERSISTENT => $persistent,
             // prepare と実行を分けると DB との往復が 2 回になるので、1 回で済ませる
             Pgsql::ATTR_DISABLE_PREPARES => true,
-        ]);
+        ];
+        if ($timeoutSeconds !== null) {
+            $options[PDO::ATTR_TIMEOUT] = $timeoutSeconds;
+        }
+        $pdo = new Pgsql($config->databaseDsn(), $config->dbUser, $config->dbPassword, $options);
         // 前のリクエストが途中で終わってトランザクションが残っていれば捨てる
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -95,6 +100,30 @@ final class Database
     public function executeScript(string $sql): void
     {
         $this->pdo->exec($sql);
+    }
+
+    /**
+     * 通知サーバーが投稿期間開始の通知を購読する
+     */
+    public function listenForPostingWindowNotifications(): void
+    {
+        $this->pdo->exec('LISTEN posting_window_opened');
+    }
+
+    /**
+     * LISTEN 済み接続に届いた通知を読み取る。payload は利用せず、通知があったかだけ返す。
+     */
+    public function consumePostingWindowNotifications(): bool
+    {
+        $received = false;
+        // 通知が集中しても1ループを占有しないよう、1回の呼び出しで読む数を制限する。
+        for ($i = 0; $i < 256; $i++) {
+            if ($this->pdo->getNotify(PDO::FETCH_ASSOC, 0) === false) {
+                break;
+            }
+            $received = true;
+        }
+        return $received;
     }
 
     /**
