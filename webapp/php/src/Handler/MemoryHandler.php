@@ -61,7 +61,7 @@ final readonly class MemoryHandler
             throw new ApiError(400, 'invalid_pagination');
         }
         $posts = $this->posts->selectWithAuthor(
-            'AND p.author_id = :author_id AND w.local_date >= :start AND w.local_date < :end
+            'AND p.posting_window_id IN (SELECT id FROM posting_windows WHERE local_date >= :start AND local_date < :end)
              AND (:before_at::timestamptz IS NULL OR (p.posted_at, p.id) < (:before_at, :before_id))
              ORDER BY p.posted_at DESC, p.id DESC LIMIT 51',
             [
@@ -96,16 +96,12 @@ final readonly class MemoryHandler
 
         $reactions = $this->realMojis->selectCurrentForPosts($postIds, 50);
         foreach ($reactions as [$reaction, $reactor]) {
-            if (count($items[$reaction->postId]['realmojis']) < 50) {
-                $items[$reaction->postId]['realmojis'][] = $reaction->toResponse($reactor);
-            }
+            $items[$reaction->postId]['realmojis'][] = $reaction->toResponse($reactor);
         }
 
         $comments = $this->comments->selectForPosts($postIds, 50);
         foreach ($comments as [$comment, $author]) {
-            if (count($items[$comment->postId]['comments']) < 50) {
-                $items[$comment->postId]['comments'][] = $comment->toResponse($author);
-            }
+            $items[$comment->postId]['comments'][] = $comment->toResponse($author);
         }
     }
 }
