@@ -1,0 +1,28 @@
+{
+	auto_https off
+	frankenphp {
+		# 通知（SSE）は届くまで接続を保持するので、php-fpm の www(16) + notifications(256) 相当のスレッドを確保する
+		num_threads 272
+		php_ini memory_limit 512M
+		php_ini post_max_size 64M
+		php_ini upload_max_filesize 32M
+		php_ini display_errors Off
+		php_ini log_errors On
+	}
+}
+
+:8080 {
+	root * public
+
+	route {
+		# /api/notifications だけ別の入口（SSE）に送り、それ以外は Slim の入口へ
+		@notifications path /api/notifications
+		rewrite @notifications /notifications.php
+		@api not path /notifications.php
+		rewrite @api /index.php
+
+		php_server {
+			file_server off
+		}
+	}
+}
