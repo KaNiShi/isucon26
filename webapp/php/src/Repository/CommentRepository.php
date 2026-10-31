@@ -46,6 +46,36 @@ final readonly class CommentRepository
         return array_map(static fn (array $row): array => [Comment::fromRow($row), User::fromRow($row, 'author.')], $rows);
     }
 
+    /**
+     * 各投稿の削除されていないコメントを古い順に指定件数まで返す。
+     *
+     * @param list<string> $postIds
+     * @return list<array{Comment, User}>
+     */
+    public function selectWithAuthorForPosts(array $postIds, int $limitPerPost = 50): array
+    {
+        if ($postIds === []) {
+            return [];
+        }
+        [$in, $params] = Database::inClause('post', $postIds);
+        $params['limit_per_post'] = $limitPerPost;
+        $rows = $this->db->fetchAll(
+            'SELECT x.*
+             FROM posts p
+             CROSS JOIN LATERAL (
+                 SELECT ' . Comment::COLUMNS . ', ' . User::columnsAs('u', 'author') . '
+                 FROM comments c JOIN users u ON u.id = c.author_id AND u.status = \'active\'
+                 WHERE c.post_id = p.id AND c.deleted_at IS NULL
+                 ORDER BY c.created_at, c.id
+                 LIMIT :limit_per_post
+             ) x
+             WHERE p.id IN (' . $in . ')
+             ORDER BY x.post_id, x.created_at, x.id',
+            $params,
+        );
+        return array_map(static fn (array $row): array => [Comment::fromRow($row), User::fromRow($row, 'author.')], $rows);
+    }
+
     public function canComment(string $viewerId, string $postId): bool
     {
         $found = $this->posts->findWithAuthor($postId);
