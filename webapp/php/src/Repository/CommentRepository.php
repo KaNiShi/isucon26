@@ -46,6 +46,38 @@ final readonly class CommentRepository
         return array_map(static fn (array $row): array => [Comment::fromRow($row), User::fromRow($row, 'author.')], $rows);
     }
 
+    /**
+     * 投稿ごとに指定件数までのコメントを、投稿者と一緒に返す。
+     *
+     * @param list<string> $postIds
+     * @return list<array{Comment, User}>
+     */
+    public function selectForPosts(array $postIds, int $limitPerPost): array
+    {
+        if ($postIds === []) {
+            return [];
+        }
+
+        [, $params] = Database::inClause('post', $postIds);
+        $selectedPosts = '(' . implode('), (', array_map(static fn (string $name): string => ":{$name}", array_keys($params))) . ')';
+        $params['limit_per_post'] = $limitPerPost;
+        $rows = $this->db->fetchAll(
+            "SELECT memory.*
+             FROM (VALUES {$selectedPosts}) AS selected_posts(post_id)
+             CROSS JOIN LATERAL (
+                SELECT " . Comment::COLUMNS . ', ' . User::columnsAs('u', 'author') . "
+                FROM comments c
+                JOIN users u ON u.id = c.author_id AND u.status = 'active'
+                WHERE c.deleted_at IS NULL AND c.post_id = selected_posts.post_id
+                ORDER BY c.created_at, c.id
+                LIMIT :limit_per_post
+             ) memory
+             ORDER BY memory.created_at, memory.id",
+            $params,
+        );
+        return array_map(static fn (array $row): array => [Comment::fromRow($row), User::fromRow($row, 'author.')], $rows);
+    }
+
     public function canComment(string $viewerId, string $postId): bool
     {
         $found = $this->posts->findWithAuthor($postId);

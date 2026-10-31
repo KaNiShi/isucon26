@@ -179,6 +179,7 @@ CREATE TABLE posts (
   deleted_at timestamptz
 );
 CREATE INDEX posts_author_id ON posts(author_id);
+CREATE INDEX posts_author_posted_at_id_active ON posts(author_id, posted_at DESC, id DESC) WHERE deleted_at IS NULL;
 CREATE INDEX posts_posting_window_id ON posts(posting_window_id);
 -- 画像の取得で、画像が削除されていない投稿のものか確かめる
 CREATE INDEX posts_image_id ON posts(image_id);
@@ -207,6 +208,7 @@ CREATE TABLE realmojis (
 );
 CREATE UNIQUE INDEX realmojis_one_active ON realmojis(post_id,reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX realmojis_post_id ON realmojis(post_id);
+CREATE INDEX realmojis_post_created_id_active ON realmojis(post_id, created_at DESC, id DESC) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 -- 画像の取得で、画像が有効な RealMoji のものか確かめる
 CREATE INDEX realmojis_image_reactor_active ON realmojis(image_id, reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
 
@@ -219,6 +221,7 @@ CREATE TABLE comments (
   deleted_at timestamptz
 );
 CREATE INDEX comments_post_id ON comments(post_id);
+CREATE INDEX comments_post_created_id_active ON comments(post_id, created_at, id) WHERE deleted_at IS NULL;
 
 CREATE TABLE notifications (
   id varchar(36) PRIMARY KEY,
