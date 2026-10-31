@@ -27,7 +27,6 @@
 	}
 
     request_header X-Sendfile-Type x-accel-redirect
-    request_header X-Accel-Mapping ../private-files=/private-files
 
     intercept {
         @accel header X-Accel-Redirect *
