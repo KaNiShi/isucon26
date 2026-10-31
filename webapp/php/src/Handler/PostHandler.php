@@ -136,7 +136,7 @@ final readonly class PostHandler
     public function show(Request $request, Response $response, array $args): Response
     {
         [$post, $author] = $this->posts->findWithAuthor($args['postId']) ?? throw new ApiError(404, 'post_not_found');
-        $viewer = $this->posts->loadViewer(SessionMiddleware::session($request)->userId);
+        $viewer = $this->posts->loadViewerForPost(SessionMiddleware::session($request)->userId, $post);
         if ($viewer === null || !$viewer->canView($post)) {
             throw new ApiError(404, 'post_not_found');
         }
