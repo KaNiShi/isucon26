@@ -48,19 +48,24 @@ final class NotificationStream
         $request = $request->withAttribute(ActionLogEntry::ATTRIBUTE, $entry);
         $route = $request->getMethod() === 'GET' && $request->getUri()->getPath() === '/api/notifications' ? '/api/notifications' : null;
         try {
-            [$session, $connectedAt] = $this->open($request);
+            [$session, $since] = $this->open($request);
         } catch (\Throwable $e) {
             $response = ErrorHandler::render(new Response(), $e);
             new ResponseEmitter()->emit($response);
             $this->log->write($request, $route, $response->getStatusCode(), $entry);
             return;
         }
-        $this->stream($session, $connectedAt);
+        $this->stream($session, $since);
         $this->log->write($request, $route, 200, $entry);
     }
 
     /**
      * リクエストとセッションを確かめ、通知を探し始める時刻を返す
+     *
+     * 通知の created_at は投稿期間を開くトランザクションの最初に決まり、見えるのはコミット後になる。
+     * 接続した時刻を基準にすると、その間に接続した人はその通知を受け取れない。
+     * そこで、接続した時点で見えている最新の通知の時刻を基準にする。
+     * 投稿期間を開く処理は users のロックで 1 つずつ進むので、created_at は開いた順に並ぶ。
      *
      * @return array{LoginSession, string}
      */
@@ -80,10 +85,14 @@ final class NotificationStream
         if ($session->region !== $this->config->region) {
             throw new ApiError(403, 'region_mismatch');
         }
-        return [$session, $db->fetchValue('SELECT clock_timestamp()')];
+        $since = $db->fetchValue(
+            "SELECT coalesce(max(created_at), '-infinity') FROM notifications WHERE user_id = :user_id",
+            ['user_id' => $session->userId],
+        );
+        return [$session, $since];
     }
 
-    private function stream(LoginSession $session, string $connectedAt): void
+    private function stream(LoginSession $session, string $since): void
     {
         set_time_limit(0);
         while (ob_get_level() > 0) {
@@ -97,7 +106,7 @@ final class NotificationStream
 
         for ($polls = 1; !connection_aborted(); $polls++) {
             try {
-                $notification = $this->poll($session, $connectedAt);
+                $notification = $this->poll($session, $since);
             } catch (\Throwable $e) {
                 error_log('failed to get notification: ' . $e);
                 return;
@@ -123,7 +132,7 @@ final class NotificationStream
      *
      * @return array<string, string>|false|null
      */
-    private function poll(LoginSession $session, string $connectedAt): array|false|null
+    private function poll(LoginSession $session, string $since): array|false|null
     {
         $db = Database::connect($this->config, persistent: false);
         $user = new UserRepository($db)->find($session->userId);
@@ -133,9 +142,9 @@ final class NotificationStream
         $notification = $db->fetchOne(
             'SELECT n.id, n.posting_window_id, w.region, n.created_at
              FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
-             WHERE n.user_id = :user_id AND n.created_at > :connected_at AND w.ended_at IS NULL
+             WHERE n.user_id = :user_id AND n.created_at > :since AND w.ended_at IS NULL
              ORDER BY n.created_at, n.id LIMIT 1',
-            ['user_id' => $session->userId, 'connected_at' => $connectedAt],
+            ['user_id' => $session->userId, 'since' => $since],
         );
         if ($notification === null) {
             return null;
