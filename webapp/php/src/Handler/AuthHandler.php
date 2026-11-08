@@ -72,17 +72,33 @@ final readonly class AuthHandler
         if (!User::validUsername($input['username'])) {
             throw new ApiError(401, 'invalid_credentials');
         }
-        [$token, $user] = $this->db->transaction(function (Database $db) use ($input): array {
-            $row = $db->fetchOne('SELECT ' . User::columns() . ' FROM users WHERE username = :username FOR NO KEY UPDATE', ['username' => $input['username']]);
-            if ($row === null) {
-                throw new ApiError(401, 'invalid_credentials');
-            }
-            $user = User::fromRow($row);
-            if ($user->status !== 'active' || $user->secretKeyHash !== Ids::sha256($input['secretKey'])) {
-                throw new ApiError(401, 'invalid_credentials');
-            }
-            return [$this->sessions->create($user->id)->token, $user];
-        });
+        $token = Ids::generate();
+        $row = $this->db->fetchOne(
+            "WITH u AS (SELECT " . User::columns() . " FROM users WHERE username = :username FOR NO KEY UPDATE),
+                  ok AS (SELECT id FROM u WHERE status = 'active' AND secret_key_hash = :secret_key_hash),
+                  upd AS (
+                      UPDATE login_sessions
+                      SET active = false, invalidated_at = clock_timestamp(), reason = 'replaced'
+                      WHERE user_id IN (SELECT id FROM ok) AND active = true
+                      RETURNING 1
+                  ),
+                  ins AS (
+                      INSERT INTO login_sessions (id, user_id, token_hash)
+                      SELECT CAST(:session_id AS varchar), id, CAST(:token_hash AS text) FROM ok
+                      RETURNING 1
+                  )
+             SELECT u.*, EXISTS (SELECT 1 FROM ok) AS authenticated, (SELECT count(*) FROM ins) AS inserted FROM u",
+            [
+                'username' => $input['username'],
+                'secret_key_hash' => Ids::sha256($input['secretKey']),
+                'session_id' => Ids::generate(),
+                'token_hash' => Ids::sha256($token),
+            ],
+        );
+        if ($row === null || !$row['authenticated']) {
+            throw new ApiError(401, 'invalid_credentials');
+        }
+        $user = User::fromRow($row);
         return Json::respond($response, ['token' => $token, 'user' => $user->toSessionUser()]);
     }
 
