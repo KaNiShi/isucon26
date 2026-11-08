@@ -12,6 +12,7 @@ use Isureal\Model\Post;
 use Isureal\Repository\UserRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Slim\Psr7\Stream;
 use ZipArchive;
 
 final readonly class ExportHandler
@@ -31,7 +32,7 @@ final readonly class ExportHandler
             'SELECT ' . Post::COLUMNS . ', i.data AS image_data
              FROM posts p
              JOIN posting_windows w ON w.id = p.posting_window_id
-             JOIN image_objects i ON i.id = p.image_id
+             JOIN image_objects i ON i.id = p.image_id AND i.created_at = p.posted_at
              WHERE p.author_id = :author_id AND p.deleted_at IS NULL
              ORDER BY p.posted_at, p.id',
             ['author_id' => $userId],
@@ -54,11 +55,12 @@ final readonly class ExportHandler
             if (!$zip->close()) {
                 throw new \RuntimeException('failed to write zip');
             }
-            $response->getBody()->write((string) file_get_contents($path));
+            $handle = fopen($path, 'rb') ?: throw new \RuntimeException('failed to open zip');
         } finally {
             @unlink($path);
         }
         return $response
+            ->withBody(new Stream($handle))
             ->withHeader('Content-Disposition', 'attachment; filename="isureal-posts.zip"')
             ->withHeader('Cache-Control', 'no-store')
             ->withHeader('Content-Type', 'application/zip');
