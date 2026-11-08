@@ -63,22 +63,29 @@ final readonly class PostRepository
 
     public function loadViewer(string $viewerId): ?ViewerContext
     {
-        $user = $this->users->find($viewerId);
-        if ($user === null) {
+        $row = $this->db->fetchOne(
+            "SELECT " . User::columns() . ",
+                    EXISTS(
+                      SELECT 1 FROM posts p
+                      JOIN posting_windows posted ON posted.id = p.posting_window_id
+                      JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
+                                                  AND current.local_date = posted.local_date
+                      WHERE p.author_id = u.id AND p.deleted_at IS NULL
+                    ) AS has_posted_today,
+                    COALESCE((SELECT json_agg(CASE WHEN blocker_id = u.id THEN blocked_id ELSE blocker_id END)
+                              FROM block_relations WHERE blocker_id = u.id OR blocked_id = u.id), '[]') AS blocked_ids,
+                    COALESCE((SELECT json_agg(CASE WHEN user_low_id = u.id THEN user_high_id ELSE user_low_id END)
+                              FROM friendships WHERE user_low_id = u.id OR user_high_id = u.id), '[]') AS friend_ids
+             FROM users u WHERE u.id = :id AND u.status = 'active'",
+            ['id' => $viewerId],
+        );
+        if ($row === null) {
             return null;
         }
-        $hasPostedToday = $this->db->fetchValue(
-            'SELECT EXISTS(
-               SELECT 1 FROM posts p
-               JOIN posting_windows posted ON posted.id = p.posting_window_id
-               JOIN posting_windows current ON current.region = :region AND current.ended_at IS NULL
-                                           AND current.local_date = posted.local_date
-               WHERE p.author_id = :user_id AND p.deleted_at IS NULL
-             )',
-            ['user_id' => $user->id, 'region' => $user->region],
-        );
-        $blocked = $this->blockedUserIds($user->id);
-        $friendIds = $this->friendIds($user->id);
+        $user = User::fromRow($row);
+        $hasPostedToday = (bool) $row['has_posted_today'];
+        $blocked = array_fill_keys(json_decode((string) $row['blocked_ids'], true, 512, JSON_THROW_ON_ERROR), true);
+        $friendIds = json_decode((string) $row['friend_ids'], true, 512, JSON_THROW_ON_ERROR);
         if ($friendIds === []) {
             return new ViewerContext($user, $hasPostedToday, [], [], [], $blocked);
         }

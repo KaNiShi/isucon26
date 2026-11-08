@@ -57,15 +57,30 @@ final readonly class FeedHandler
             $followeeIds = $this->db->fetchColumn('SELECT followee_id FROM follows WHERE follower_id = :follower_id', ['follower_id' => $viewer->user->id]);
             $following = array_fill_keys($followeeIds, true);
         }
+        $authorIds = match ($feed) {
+            'friends' => array_keys($viewer->friends),
+            'friends-of-friends' => array_keys($viewer->friendsOfFriends),
+            'following' => array_keys($following),
+            default => null,
+        };
+        $authorFilter = '';
+        $authorParams = [];
+        if ($authorIds !== null) {
+            if ($authorIds === []) {
+                return Json::respond($response, UserHandler::page([]));
+            }
+            [$in, $authorParams] = Database::inClause('author', array_map('strval', $authorIds));
+            $authorFilter = "AND p.author_id IN ({$in})";
+        }
         $posts = $this->posts->selectWithAuthor(
-            'AND p.author_id <> :viewer_id AND w.ended_at IS NULL
+            "AND p.author_id <> :viewer_id AND w.ended_at IS NULL {$authorFilter}
              AND (:before_posted_at::timestamptz IS NULL OR (p.posted_at, p.id) < (:before_posted_at, :before_id))
-             ORDER BY p.posted_at DESC, p.id DESC',
+             ORDER BY p.posted_at DESC, p.id DESC",
             [
                 'viewer_id' => $viewer->user->id,
                 'before_posted_at' => $ranked || $beforePostedAt === null ? null : Time::toDb($beforePostedAt),
                 'before_id' => $ranked ? '' : $beforeId,
-            ],
+            ] + $authorParams,
         );
         $candidates = array_values(array_filter(
             $posts,

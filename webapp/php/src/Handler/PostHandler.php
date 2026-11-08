@@ -59,9 +59,12 @@ final readonly class PostHandler
 
         $userId = SessionMiddleware::session($request)->userId;
         [$post, $user] = $this->db->transaction(function (Database $db) use ($userId, $imageData, $caption, $visibility, $location): array {
-            $this->users->mustLock($userId);
-            $user = $this->users->mustFind($userId);
-            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR UPDATE';
+            $userRow = $db->fetchOne(
+                'SELECT ' . User::columns() . " FROM users WHERE id = :id AND status = 'active' FOR NO KEY UPDATE",
+                ['id' => $userId],
+            ) ?? throw new \RuntimeException('sql: no rows in result set');
+            $user = User::fromRow($userRow);
+            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR SHARE';
             $window = $db->fetchOne($sql, ['region' => $user->region]);
             $window ??= $db->fetchOne($sql, ['region' => $user->region]);
             if ($window === null) {
