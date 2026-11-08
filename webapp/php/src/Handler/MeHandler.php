@@ -74,7 +74,16 @@ final readonly class MeHandler
         if (($request->getHeader('Content-Type')[0] ?? '') !== 'image/jpeg') {
             throw new ApiError(415, 'unsupported_media_type');
         }
-        $data = (string) $request->getBody();
+        $body = $request->getBody();
+        if ($body->isSeekable()) {
+            $head = $body->read(2);
+            $body->rewind();
+            if ($head !== "\xFF\xD8") {
+                ActionLogEntry::of($request)->abuse = 'invalid_image';
+                throw new ApiError(400, 'invalid_profile_image');
+            }
+        }
+        $data = (string) $body;
         $size = Jpeg::size($data);
         if ($size === null) {
             ActionLogEntry::of($request)->abuse = 'invalid_image';
