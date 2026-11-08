@@ -56,11 +56,13 @@ final readonly class ExportHandler
                 throw new \RuntimeException('failed to write zip');
             }
             $handle = fopen($path, 'rb') ?: throw new \RuntimeException('failed to open zip');
+            $length = (string) filesize($path);
         } finally {
             @unlink($path);
         }
         return $response
             ->withBody(new Stream($handle))
+            ->withHeader('Content-Length', $length)
             ->withHeader('Content-Disposition', 'attachment; filename="isureal-posts.zip"')
             ->withHeader('Cache-Control', 'no-store')
             ->withHeader('Content-Type', 'application/zip');
