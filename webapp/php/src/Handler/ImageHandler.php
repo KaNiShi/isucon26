@@ -11,6 +11,7 @@ use Isureal\Http\ActionLogEntry;
 use Isureal\Http\ErrorHandler;
 use Isureal\Http\Input;
 use Isureal\ImageSignature;
+use Isureal\ImageStore;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -52,9 +53,40 @@ final readonly class ImageHandler
             throw self::forbidden();
         }
 
-        $object = $this->db->fetchOne(
+        $stored = ImageStore::exists($imageId);
+        $object = $this->fetchObject($imageId, !$stored);
+        if ($object === null) {
+            throw self::forbidden();
+        }
+        $key = ImageSignature::signingKey($object['secret_key_hash']);
+        if (!hash_equals(ImageSignature::sign($key, $imageId, $expiresAt), $signature)) {
+            ActionLogEntry::of($request)->abuse = 'invalid_signature';
+            throw self::forbidden();
+        }
+        if (!$object['visible']) {
+            throw self::forbidden();
+        }
+        if ($expiresAt <= time()) {
+            throw self::forbidden();
+        }
+        $data = $stored ? ImageStore::read($imageId) : null;
+        if ($data === null) {
+            $object = $object['data'] === null ? $this->fetchObject($imageId, true) : $object;
+            if ($object === null || !$object['visible'] || $object['data'] === null) {
+                throw self::forbidden();
+            }
+            $data = Bytea::read($object['data']);
+            ImageStore::write($imageId, $data);
+        }
+        $response->getBody()->write($data);
+        return $response->withHeader('Content-Type', $object['media_type']);
+    }
+
+    private function fetchObject(string $imageId, bool $withData): ?array
+    {
+        return $this->db->fetchOne(
             "SELECT u.secret_key_hash, i.media_type, v.visible,
-                    CASE WHEN v.visible THEN i.data END AS data
+                    CASE WHEN v.visible AND CAST(:with_data AS int) = 1 THEN i.data END AS data
              FROM image_objects i
              JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
              CROSS JOIN LATERAL (
@@ -73,21 +105,8 @@ final readonly class ImageHandler
                ) AS visible
              ) v
              WHERE i.id = :id",
-            ['id' => $imageId],
-        ) ?? throw self::forbidden();
-        $key = ImageSignature::signingKey($object['secret_key_hash']);
-        if (!hash_equals(ImageSignature::sign($key, $imageId, $expiresAt), $signature)) {
-            ActionLogEntry::of($request)->abuse = 'invalid_signature';
-            throw self::forbidden();
-        }
-        if (!$object['visible']) {
-            throw self::forbidden();
-        }
-        if ($expiresAt <= time()) {
-            throw self::forbidden();
-        }
-        $response->getBody()->write(Bytea::read($object['data']));
-        return $response->withHeader('Content-Type', $object['media_type']);
+            ['id' => $imageId, 'with_data' => $withData ? 1 : 0],
+        );
     }
 
     private static function forbidden(): ApiError
