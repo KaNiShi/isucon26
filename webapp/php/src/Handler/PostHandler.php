@@ -64,39 +64,50 @@ final readonly class PostHandler
                 ['id' => $userId],
             ) ?? throw new \RuntimeException('sql: no rows in result set');
             $user = User::fromRow($userRow);
-            $sql = 'SELECT id, local_date, starts_at FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR SHARE';
-            $window = $db->fetchOne($sql, ['region' => $user->region]);
-            $window ??= $db->fetchOne($sql, ['region' => $user->region]);
+            $windowSql = 'WITH w AS (
+                     SELECT id, local_date, starts_at, on_time_deadline FROM posting_windows WHERE region = :region AND ended_at IS NULL FOR SHARE
+                 )
+                 SELECT w.id, w.starts_at, w.on_time_deadline,
+                        (SELECT count(*) FILTER (WHERE p.deleted_at IS NULL)
+                         FROM posts p JOIN posting_windows pw ON pw.id = p.posting_window_id
+                         WHERE p.author_id = :author_id AND pw.local_date = w.local_date) AS active,
+                        (SELECT count(*) FILTER (WHERE p.deleted_at IS NOT NULL)
+                         FROM posts p JOIN posting_windows pw ON pw.id = p.posting_window_id
+                         WHERE p.author_id = :author_id AND pw.local_date = w.local_date) AS deleted
+                 FROM w';
+            $windowParams = ['region' => $user->region, 'author_id' => $userId];
+            $window = $db->fetchOne($windowSql, $windowParams);
+            $window ??= $db->fetchOne($windowSql, $windowParams);
             if ($window === null) {
                 throw new ApiError(409, 'post_slot_unavailable');
             }
-            $counts = $db->fetchOne(
-                'SELECT count(*) FILTER (WHERE deleted_at IS NULL) AS active,
-                        count(*) FILTER (WHERE deleted_at IS NOT NULL) AS deleted
-                 FROM posts p JOIN posting_windows w ON w.id = p.posting_window_id
-                 WHERE p.author_id = :author_id AND w.local_date = :local_date',
-                ['author_id' => $userId, 'local_date' => $window['local_date']],
-            ) ?? throw new \RuntimeException('sql: no rows in result set');
             $postedAt = Time::now();
-            if ($counts['active'] !== 0 || $counts['deleted'] >= 2 || $postedAt < Time::fromDb($window['starts_at'])) {
+            if ($window['active'] !== 0 || $window['deleted'] >= 2 || $postedAt < Time::fromDb($window['starts_at'])) {
                 throw new ApiError(409, 'post_slot_unavailable');
             }
-            $imageId = Ids::generate();
-            $db->execute(
-                "INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at) VALUES (:id, :owner_user_id, :data, 'image/jpeg', :created_at)",
-                ['id' => $imageId, 'owner_user_id' => $userId, 'data' => new Bytea($imageData), 'created_at' => Time::toDb($postedAt)],
-            );
-            $postId = Ids::generate();
-            $db->execute(
-                'INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
-                                    location_kind, latitude, longitude, locality, posted_at)
-                 VALUES (:id, :author_id, :posting_window_id, :image_id, :caption, :visibility,
-                         :location_kind, :latitude, :longitude, :locality, :posted_at)',
+            $columns = 'ins.id, ins.author_id, ins.posting_window_id, ins.image_id, ins.caption, ins.visibility,
+                        ins.location_kind, ins.latitude, ins.longitude, ins.locality, ins.posted_at';
+            $row = $db->fetchOne(
+                "WITH img AS (
+                     INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at)
+                     VALUES (:image_id, :author_id, :data, 'image/jpeg', :posted_at) RETURNING 1
+                 ),
+                 ins AS (
+                     INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
+                                        location_kind, latitude, longitude, locality, posted_at)
+                     VALUES (:id, :author_id, :posting_window_id, :image_id, :caption, :visibility,
+                             :location_kind, :latitude, :longitude, :locality, :posted_at)
+                     RETURNING id, author_id, posting_window_id, image_id, caption, visibility,
+                               location_kind, latitude, longitude, locality, posted_at
+                 )
+                 SELECT {$columns}, w.on_time_deadline, w.ended_at AS window_ended_at
+                 FROM ins JOIN posting_windows w ON w.id = ins.posting_window_id",
                 [
-                    'id' => $postId,
+                    'id' => Ids::generate(),
+                    'image_id' => Ids::generate(),
                     'author_id' => $userId,
+                    'data' => new Bytea($imageData),
                     'posting_window_id' => $window['id'],
-                    'image_id' => $imageId,
                     'caption' => $caption,
                     'visibility' => $visibility,
                     'location_kind' => $location->kind,
@@ -105,8 +116,8 @@ final readonly class PostHandler
                     'locality' => $location->locality,
                     'posted_at' => Time::toDb($postedAt),
                 ],
-            );
-            return [$this->posts->mustFind($postId), $user];
+            ) ?? throw new \RuntimeException('sql: no rows in result set');
+            return [Post::fromRow($row), $user];
         });
         return Json::respond($response, $post->toResponse($user), 201);
     }

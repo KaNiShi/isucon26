@@ -34,32 +34,43 @@ final readonly class FriendRequestHandler
         $actor = SessionMiddleware::session($request)->userId;
         $friendRequest = $this->db->transaction(function (Database $db) use ($actor, $recipientId): FriendRequest {
             $this->relationships->lockPair($actor, $recipientId);
-            if ($this->relationships->isBlocked($actor, $recipientId) || in_array($recipientId, $this->posts->friendIds($actor), true)) {
+            [$low, $high] = Ids::ordered($actor, $recipientId);
+            $state = $db->fetchOne(
+                "SELECT EXISTS(SELECT 1 FROM block_relations WHERE (blocker_id = :actor AND blocked_id = :recipient) OR (blocker_id = :recipient AND blocked_id = :actor)) AS blocked,
+                        EXISTS(SELECT 1 FROM friendships WHERE user_low_id = :low AND user_high_id = :high) AS friends,
+                        (SELECT id || ',' || requester_id FROM friend_requests WHERE status = 'pending' AND
+                          ((requester_id = :actor AND recipient_id = :recipient) OR (requester_id = :recipient AND recipient_id = :actor)) LIMIT 1) AS pending",
+                ['actor' => $actor, 'recipient' => $recipientId, 'low' => $low, 'high' => $high],
+            ) ?? throw new \RuntimeException('sql: no rows in result set');
+            if ($state['blocked'] || $state['friends']) {
                 throw new ApiError(409, 'relationship_conflict');
             }
-            $existingId = $db->fetchValue(
-                "SELECT id FROM friend_requests WHERE status = 'pending' AND
-                  ((requester_id = :actor AND recipient_id = :recipient) OR (requester_id = :recipient AND recipient_id = :actor))",
-                ['actor' => $actor, 'recipient' => $recipientId],
-            );
-            if ($existingId !== null) {
-                // 相手から申請が来ていれば承認する
-                $existing = $this->relationships->mustFindFriendRequest($existingId);
-                if ($existing->requesterId === $actor) {
+            $columns = FriendRequest::COLUMNS;
+            if ($state['pending'] !== null) {
+                [$existingId, $requesterId] = explode(',', (string) $state['pending'], 2);
+                if ($requesterId === $actor) {
                     throw new ApiError(409, 'relationship_conflict');
                 }
-                $db->execute("UPDATE friend_requests SET status = 'accepted', updated_at = clock_timestamp() WHERE id = :id", ['id' => $existing->id]);
-                $this->relationships->insertFriendship($existing);
-                $requestId = $existing->id;
+                $row = $db->fetchOne(
+                    "WITH upd AS (
+                         UPDATE friend_requests SET status = 'accepted', updated_at = clock_timestamp() WHERE id = :id RETURNING {$columns}
+                     ),
+                     ins AS (
+                         INSERT INTO friendships (id, user_low_id, user_high_id, source_request_id)
+                         VALUES (:friendship_id, :low, :high, :id) RETURNING 1
+                     )
+                     SELECT {$columns} FROM upd",
+                    ['id' => $existingId, 'friendship_id' => Ids::generate(), 'low' => $low, 'high' => $high],
+                );
             } else {
-                $requestId = Ids::generate();
-                $db->execute(
+                $row = $db->fetchOne(
                     "INSERT INTO friend_requests (id, requester_id, recipient_id, status, created_at, updated_at)
-                     VALUES (:id, :requester_id, :recipient_id, 'pending', clock_timestamp(), clock_timestamp())",
-                    ['id' => $requestId, 'requester_id' => $actor, 'recipient_id' => $recipientId],
+                     VALUES (:id, :requester_id, :recipient_id, 'pending', clock_timestamp(), clock_timestamp())
+                     RETURNING {$columns}",
+                    ['id' => Ids::generate(), 'requester_id' => $actor, 'recipient_id' => $recipientId],
                 );
             }
-            return $this->relationships->mustFindFriendRequest($requestId);
+            return FriendRequest::fromRow($row ?? throw new \RuntimeException('sql: no rows in result set'));
         });
         return Json::respond($response, $friendRequest->toResponse(), 201);
     }
@@ -85,18 +96,39 @@ final readonly class FriendRequestHandler
         }
         $friendRequest = $this->db->transaction(function (Database $db) use ($friendRequest, $status): FriendRequest {
             $this->relationships->lockPair($friendRequest->requesterId, $friendRequest->recipientId);
-            $friendRequest = $this->relationships->mustFindFriendRequest($friendRequest->id);
-            if ($friendRequest->status !== 'pending') {
+            $columns = FriendRequest::COLUMNS;
+            $current = $db->fetchOne(
+                "SELECT {$columns},
+                        EXISTS(SELECT 1 FROM block_relations WHERE (blocker_id = :requester AND blocked_id = :recipient) OR (blocker_id = :recipient AND blocked_id = :requester)) AS blocked
+                 FROM friend_requests WHERE id = :id",
+                ['id' => $friendRequest->id, 'requester' => $friendRequest->requesterId, 'recipient' => $friendRequest->recipientId],
+            ) ?? throw new \RuntimeException('sql: no rows in result set');
+            if ($current['status'] !== 'pending') {
                 throw new ApiError(403, 'relationship_action_forbidden');
             }
             if ($status === 'accepted') {
-                if ($this->relationships->isBlocked($friendRequest->requesterId, $friendRequest->recipientId)) {
+                if ($current['blocked']) {
                     throw new ApiError(409, 'relationship_conflict');
                 }
-                $this->relationships->insertFriendship($friendRequest);
+                [$low, $high] = Ids::ordered($friendRequest->requesterId, $friendRequest->recipientId);
+                $row = $db->fetchOne(
+                    "WITH upd AS (
+                         UPDATE friend_requests SET status = :status, updated_at = clock_timestamp() WHERE id = :id RETURNING {$columns}
+                     ),
+                     ins AS (
+                         INSERT INTO friendships (id, user_low_id, user_high_id, source_request_id)
+                         VALUES (:friendship_id, :low, :high, :id) RETURNING 1
+                     )
+                     SELECT {$columns} FROM upd",
+                    ['id' => $friendRequest->id, 'status' => $status, 'friendship_id' => Ids::generate(), 'low' => $low, 'high' => $high],
+                );
+            } else {
+                $row = $db->fetchOne(
+                    "UPDATE friend_requests SET status = :status, updated_at = clock_timestamp() WHERE id = :id RETURNING {$columns}",
+                    ['id' => $friendRequest->id, 'status' => $status],
+                );
             }
-            $db->execute('UPDATE friend_requests SET status = :status, updated_at = clock_timestamp() WHERE id = :id', ['id' => $friendRequest->id, 'status' => $status]);
-            return $this->relationships->mustFindFriendRequest($friendRequest->id);
+            return FriendRequest::fromRow($row ?? throw new \RuntimeException('sql: no rows in result set'));
         });
         return Json::respond($response, $friendRequest->toResponse());
     }

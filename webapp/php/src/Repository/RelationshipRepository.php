@@ -23,11 +23,12 @@ final readonly class RelationshipRepository
         if ($actor === $target || $target === '') {
             throw new ApiError(400, 'invalid_relationship');
         }
-        foreach (Ids::ordered($actor, $target) as $id) {
-            $locked = $this->db->fetchValue("SELECT id FROM users WHERE id = :id AND status = 'active' FOR NO KEY UPDATE", ['id' => $id]);
-            if ($locked === null) {
-                throw new ApiError(404, 'relationship_not_found');
-            }
+        $locked = $this->db->fetchColumn(
+            "SELECT id FROM users WHERE id IN (:first, :second) AND status = 'active' ORDER BY id COLLATE \"C\" FOR NO KEY UPDATE",
+            ['first' => $actor, 'second' => $target],
+        );
+        if (count($locked) !== 2) {
+            throw new ApiError(404, 'relationship_not_found');
         }
     }
 
