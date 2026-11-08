@@ -52,37 +52,37 @@ final readonly class ImageHandler
             throw self::forbidden();
         }
 
-        $secretKeyHash = $this->db->fetchValue(
-            "SELECT u.secret_key_hash
-             FROM image_objects i JOIN users u ON u.id = i.owner_user_id
-             WHERE i.id = :id AND u.status = 'active'",
+        $object = $this->db->fetchOne(
+            "SELECT u.secret_key_hash, i.media_type, v.visible,
+                    CASE WHEN v.visible THEN i.data END AS data
+             FROM image_objects i
+             JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
+             CROSS JOIN LATERAL (
+               SELECT (
+                 u.profile_image_id = i.id
+                 OR EXISTS (
+                   SELECT 1 FROM posts p
+                   WHERE p.image_id = i.id AND p.author_id = u.id AND p.deleted_at IS NULL
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM realmojis r
+                   JOIN posts p ON p.id = r.post_id AND p.deleted_at IS NULL
+                   JOIN users author ON author.id = p.author_id AND author.status = 'active'
+                   WHERE r.image_id = i.id AND r.reactor_id = u.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
+                 )
+               ) AS visible
+             ) v
+             WHERE i.id = :id",
             ['id' => $imageId],
         ) ?? throw self::forbidden();
-        $key = ImageSignature::signingKey($secretKeyHash);
+        $key = ImageSignature::signingKey($object['secret_key_hash']);
         if (!hash_equals(ImageSignature::sign($key, $imageId, $expiresAt), $signature)) {
             ActionLogEntry::of($request)->abuse = 'invalid_signature';
             throw self::forbidden();
         }
-
-        // 削除状態を毎回確認する。即時反映も5秒以内の許容範囲に含まれる。
-        $object = $this->db->fetchOne(
-            "SELECT i.data, i.media_type
-             FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
-             WHERE i.id = :id AND (
-               u.profile_image_id = i.id
-               OR EXISTS (
-                 SELECT 1 FROM posts p
-                 WHERE p.image_id = i.id AND p.author_id = u.id AND p.deleted_at IS NULL
-               )
-               OR EXISTS (
-                 SELECT 1 FROM realmojis r
-                 JOIN posts p ON p.id = r.post_id AND p.deleted_at IS NULL
-                 JOIN users author ON author.id = p.author_id AND author.status = 'active'
-                 WHERE r.image_id = i.id AND r.reactor_id = u.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
-               )
-             )",
-            ['id' => $imageId],
-        ) ?? throw self::forbidden();
+        if (!$object['visible']) {
+            throw self::forbidden();
+        }
         if ($expiresAt <= time()) {
             throw self::forbidden();
         }
