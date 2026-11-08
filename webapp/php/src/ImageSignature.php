@@ -21,6 +21,12 @@ final class ImageSignature
     /** @var list<array{string, string, int}> */
     private static array $pending = [];
 
+    /** @var array<string, int> */
+    private static array $pendingIndexes = [];
+
+    /** @var array<string, string> */
+    private static array $memo = [];
+
     /**
      * secret_key_hash（16 進数の SHA-256）を署名の鍵にする
      */
@@ -34,9 +40,12 @@ final class ImageSignature
 
     public static function sign(string $key, string $imageId, int $exp): string
     {
+        $base = hash_init('sha256', HASH_HMAC, $key);
         $value = "{$exp}:{$imageId}";
         for ($i = 0; $i < self::ITERATIONS; $i++) {
-            $value = hash_hmac('sha256', $value, $key, true);
+            $context = hash_copy($base);
+            hash_update($context, $value);
+            $value = hash_final($context, true);
         }
         return $value;
     }
@@ -44,11 +53,18 @@ final class ImageSignature
     public static function url(User $user, string $imageId): string
     {
         $exp = time() + self::URL_LIFETIME;
+        $hexKey = bin2hex($user->imageKey());
+        $identity = "{$hexKey}|{$imageId}|{$exp}";
         if (self::delegating()) {
-            $signature = '@@isig' . count(self::$pending) . '@@';
-            self::$pending[] = [bin2hex($user->imageKey()), $imageId, $exp];
+            $index = self::$pendingIndexes[$identity] ?? null;
+            if ($index === null) {
+                $index = count(self::$pending);
+                self::$pending[] = [$hexKey, $imageId, $exp];
+                self::$pendingIndexes[$identity] = $index;
+            }
+            $signature = '@@isig' . $index . '@@';
         } else {
-            $signature = self::base64UrlEncode(self::sign($user->imageKey(), $imageId, $exp));
+            $signature = self::$memo[$identity] ??= self::base64UrlEncode(self::sign($user->imageKey(), $imageId, $exp));
         }
         return '/api/images/' . rawurlencode($imageId) . '?exp=' . $exp . '&sig=' . $signature;
     }
@@ -60,6 +76,7 @@ final class ImageSignature
         }
         $pending = self::$pending;
         self::$pending = [];
+        self::$pendingIndexes = [];
         $signatures = count($pending) >= self::DELEGATE_THRESHOLD ? self::signRemotely($pending) : [];
         $replacements = [];
         foreach ($pending as $index => [$hexKey, $imageId, $exp]) {
