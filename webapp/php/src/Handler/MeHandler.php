@@ -85,19 +85,28 @@ final readonly class MeHandler
             throw new ApiError(400, 'invalid_profile_image');
         }
         $userId = SessionMiddleware::session($request)->userId;
-        $this->db->transaction(function (Database $db) use ($userId, $data): void {
-            $row = $db->fetchOne('SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $userId])
-                ?? throw new ApiError(404, 'account_not_found');
-            $imageId = Ids::generate();
-            $db->execute(
-                "INSERT INTO image_objects (id, owner_user_id, data, media_type) VALUES (:id, :owner_user_id, :data, 'image/jpeg')",
-                ['id' => $imageId, 'owner_user_id' => $userId, 'data' => new Bytea($data)],
-            );
-            $db->execute('UPDATE users SET profile_image_id = :image_id, updated_at = clock_timestamp() WHERE id = :id', ['id' => $userId, 'image_id' => $imageId]);
-            if ($row['profile_image_id'] !== null) {
-                $db->execute('DELETE FROM image_objects WHERE id = :id', ['id' => $row['profile_image_id']]);
-            }
-        });
+        $found = $this->db->fetchValue(
+            "WITH old AS (SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE),
+                  ins AS (
+                      INSERT INTO image_objects (id, owner_user_id, data, media_type)
+                      SELECT CAST(:image_id AS varchar), CAST(:id AS varchar), CAST(:data AS bytea), 'image/jpeg' FROM old
+                      RETURNING 1
+                  ),
+                  upd AS (
+                      UPDATE users SET profile_image_id = CAST(:image_id AS varchar), updated_at = clock_timestamp()
+                      WHERE id = :id AND EXISTS (SELECT 1 FROM old)
+                      RETURNING 1
+                  ),
+                  del AS (
+                      DELETE FROM image_objects WHERE id = (SELECT profile_image_id FROM old)
+                      RETURNING 1
+                  )
+             SELECT count(*) FROM old",
+            ['id' => $userId, 'image_id' => Ids::generate(), 'data' => new Bytea($data)],
+        );
+        if ((int) $found === 0) {
+            throw new ApiError(404, 'account_not_found');
+        }
         return Json::noContent($response);
     }
 
@@ -107,12 +116,23 @@ final readonly class MeHandler
     public function deleteProfileImage(Request $request, Response $response): Response
     {
         $userId = SessionMiddleware::session($request)->userId;
-        $this->db->transaction(function (Database $db) use ($userId): void {
-            $imageId = $db->fetchValue('SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE', ['id' => $userId])
-                ?? throw new ApiError(404, 'account_not_found');
-            $db->execute('UPDATE users SET profile_image_id = NULL, updated_at = clock_timestamp() WHERE id = :id', ['id' => $userId]);
-            $db->execute('DELETE FROM image_objects WHERE id = :id', ['id' => $imageId]);
-        });
+        $imageId = $this->db->fetchValue(
+            'WITH old AS (SELECT profile_image_id FROM users WHERE id = :id FOR NO KEY UPDATE),
+                  upd AS (
+                      UPDATE users SET profile_image_id = NULL, updated_at = clock_timestamp()
+                      WHERE id = :id AND EXISTS (SELECT 1 FROM old WHERE profile_image_id IS NOT NULL)
+                      RETURNING 1
+                  ),
+                  del AS (
+                      DELETE FROM image_objects WHERE id = (SELECT profile_image_id FROM old)
+                      RETURNING 1
+                  )
+             SELECT profile_image_id FROM old',
+            ['id' => $userId],
+        );
+        if ($imageId === null) {
+            throw new ApiError(404, 'account_not_found');
+        }
         return Json::noContent($response);
     }
 
