@@ -35,7 +35,8 @@ final readonly class SessionMiddleware implements MiddlewareInterface
         if ($token === null) {
             throw new ApiError(401, 'invalid_session');
         }
-        $session = $this->sessions->findByToken($token) ?? throw new ApiError(401, 'invalid_session');
+        $session = $request->getAttribute(IpBanMiddleware::SESSION_ATTRIBUTE)
+            ?? $this->sessions->findByToken($token) ?? throw new ApiError(401, 'invalid_session');
         ActionLogEntry::of($request)->userId = $session->userId;
         return $session;
     }
