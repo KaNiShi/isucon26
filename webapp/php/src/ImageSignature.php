@@ -120,7 +120,6 @@ final class ImageSignature
         ]);
         $body = curl_exec($handle);
         $status = curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        curl_close($handle);
         $decoded = $status === 200 && is_string($body) ? json_decode($body, true) : null;
         $signatures = [];
         if (is_array($decoded) && count($decoded) === count($pending)) {

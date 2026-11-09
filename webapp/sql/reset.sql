@@ -41,3 +41,14 @@ INSERT INTO block_relations (id, blocker_id, blocked_id, created_at)
 SELECT id, blocker_id, blocked_id, created_at FROM initial_block_relations;
 
 COMMIT;
+
+CREATE INDEX IF NOT EXISTS login_sessions_token_hash ON login_sessions(token_hash);
+CREATE INDEX IF NOT EXISTS login_sessions_user_id ON login_sessions(user_id) WHERE active;
+CREATE INDEX IF NOT EXISTS friendships_user_high_id ON friendships(user_high_id);
+CREATE INDEX IF NOT EXISTS follows_followee_id ON follows(followee_id);
+CREATE INDEX IF NOT EXISTS block_relations_blocked_id ON block_relations(blocked_id);
+CREATE INDEX IF NOT EXISTS friend_requests_recipient_id_status ON friend_requests(recipient_id, status);
+CREATE INDEX IF NOT EXISTS friend_requests_requester_id_status ON friend_requests(requester_id, status);
+CREATE INDEX IF NOT EXISTS realmojis_image_reactor_active ON realmojis(image_id, reactor_id) WHERE replaced_at IS NULL AND deleted_at IS NULL;
+
+ANALYZE users, login_sessions, friendships, follows, block_relations, friend_requests, realmojis, posts, comments, posting_windows, notifications;
