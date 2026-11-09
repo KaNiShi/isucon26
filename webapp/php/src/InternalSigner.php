@@ -6,7 +6,7 @@ namespace Isureal;
 
 final class InternalSigner
 {
-    private const int MAX_ITEMS = 4000;
+    private const int MAX_ITEMS = 100000;
 
     public static function handle(): void
     {

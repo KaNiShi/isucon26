@@ -109,45 +109,28 @@ final class ImageSignature
      */
     private static function signRemotely(array $pending): array
     {
-        $hosts = self::REMOTE_HOSTS;
-        $chunks = array_chunk($pending, (int) ceil(count($pending) / count($hosts)), preserve_keys: true);
-        $multi = curl_multi_init();
-        $handles = [];
-        foreach ($chunks as $position => $chunk) {
-            $handle = curl_init('http://' . $hosts[$position % count($hosts)] . self::INTERNAL_PATH);
-            curl_setopt_array($handle, [
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode(array_values($chunk), JSON_THROW_ON_ERROR),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Internal-Token: ' . self::INTERNAL_TOKEN],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT_MS => 500,
-                CURLOPT_TIMEOUT_MS => 3000,
-            ]);
-            curl_multi_add_handle($multi, $handle);
-            $handles[$position] = $handle;
-        }
-        do {
-            curl_multi_exec($multi, $running);
-            if ($running > 0) {
-                curl_multi_select($multi, 0.05);
-            }
-        } while ($running > 0);
+        $handle = curl_init('http://' . self::REMOTE_HOSTS[random_int(0, count(self::REMOTE_HOSTS) - 1)] . self::INTERNAL_PATH);
+        curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode(array_values($pending), JSON_THROW_ON_ERROR),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Internal-Token: ' . self::INTERNAL_TOKEN],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT_MS => 500,
+            CURLOPT_TIMEOUT_MS => 3000,
+        ]);
+        $body = curl_exec($handle);
+        $status = curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        curl_close($handle);
+        $decoded = $status === 200 && is_string($body) ? json_decode($body, true) : null;
         $signatures = [];
-        foreach ($handles as $position => $handle) {
-            $body = curl_multi_getcontent($handle);
-            $decoded = curl_getinfo($handle, CURLINFO_RESPONSE_CODE) === 200 && is_string($body) ? json_decode($body, true) : null;
-            $keys = array_keys($chunks[$position]);
-            if (is_array($decoded) && count($decoded) === count($keys)) {
-                foreach ($keys as $offset => $index) {
-                    $signature = base64_decode((string) $decoded[$offset], true);
-                    if ($signature !== false && strlen($signature) === 32) {
-                        $signatures[$index] = $signature;
-                    }
+        if (is_array($decoded) && count($decoded) === count($pending)) {
+            foreach (array_keys($pending) as $offset => $index) {
+                $signature = base64_decode((string) $decoded[$offset], true);
+                if ($signature !== false && strlen($signature) === 32) {
+                    $signatures[$index] = $signature;
                 }
             }
-            curl_multi_remove_handle($multi, $handle);
         }
-        curl_multi_close($multi);
         return $signatures;
     }
 
