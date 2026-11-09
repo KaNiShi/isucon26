@@ -13,7 +13,7 @@ final class ImageSignature
 {
     public const int URL_LIFETIME = 24 * 60 * 60;
     private const int ITERATIONS = 1000;
-    private const int DELEGATE_THRESHOLD = 120;
+    private const int DELEGATE_THRESHOLD = 0;
     private const array REMOTE_HOSTS = ['192.168.2.10', '192.168.3.10'];
     public const string INTERNAL_PATH = '/api/internal/signatures';
     public const string INTERNAL_TOKEN = 'b1f0c6a2-5d7e-4c1a-9e3b-7a4d2f8c6e10';
